@@ -14,7 +14,7 @@
   // CF_ACCESS_AUD: the AUD tag of the Access Application that fronts this
   //   Worker. Found in Zero Trust → Access → Applications → your app.
   "vars": {
-    "BASE_URL": "https://kroger-mcp.<your-subdomain>.workers.dev",
+    "BASE_URL": "kroger-mcp.f-crisciani.workers.dev",
     "CF_ACCESS_TEAM_DOMAIN": "<your-team>",
     "CF_ACCESS_AUD": "<your-application-aud>"
   },
@@ -24,8 +24,8 @@
   //   KROGER_KV → our own: Kroger refresh token, default location, usual-items list
   // Run `npm run kv:create` and paste the returned IDs here.
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" },
-    { "binding": "KROGER_KV", "id": "REPLACE_WITH_KROGER_KV_ID" }
+    { "binding": "OAUTH_KV", "id": "864585eac26f4ebfb92d42c31d8bafe6" },
+    { "binding": "KROGER_KV", "id": "734aa59f10444f1386735042f55ce6ee" }
   ],
 
   // McpAgent uses a Durable Object for per-session state.
