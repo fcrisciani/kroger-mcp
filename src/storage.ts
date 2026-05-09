@@ -62,9 +62,14 @@ export async function upsertUsualItem(env: Env, item: UsualItem): Promise<UsualI
   const doc = await getUsualItems(env);
   const idx = doc.items.findIndex((i) => i.productId === item.productId);
   if (idx >= 0) {
-    // addedBy tracks the original creator — don't let an update from another
-    // family member overwrite it.
-    const { addedBy: _ignored, ...updates } = item;
+    // Updates from the user-facing tools must not clobber three derived/
+    // historical fields:
+    //   - addedBy:      tracks the original creator, not the latest editor
+    //   - timesOrdered: bumped only by recordOrderedItems on real cart adds
+    //   - lastOrdered:  same — set only when the item lands in a Kroger cart
+    // add_usual_item hardcodes timesOrdered: 0, so without this stripping
+    // an "update" call would silently reset every item's order history.
+    const { addedBy: _a, timesOrdered: _t, lastOrdered: _l, ...updates } = item;
     doc.items[idx] = { ...doc.items[idx]!, ...updates };
   } else {
     doc.items.push(item);

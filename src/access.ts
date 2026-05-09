@@ -46,7 +46,17 @@ export class AccessAuthError extends Error {
 // in production — it would let anyone bypass Access by hitting the Worker URL
 // directly.
 export async function identifyUser(request: Request, env: Env): Promise<AccessIdentity> {
-  if (env.DEV_AUTH_EMAIL) return { email: env.DEV_AUTH_EMAIL };
+  // DEV_AUTH_EMAIL is a footgun in production — if a secret with that name
+  // ever gets set on the deployed Worker (typo, copy-paste, leftover from a
+  // local config sync), it would silently bypass Access for everyone. Defense
+  // in depth: only honor it when the request is hitting the Worker via
+  // localhost, which is impossible from outside `wrangler dev`.
+  if (env.DEV_AUTH_EMAIL) {
+    const { hostname } = new URL(request.url);
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return { email: env.DEV_AUTH_EMAIL };
+    }
+  }
 
   const jwt = request.headers.get(ACCESS_JWT_HEADER);
   if (!jwt) {

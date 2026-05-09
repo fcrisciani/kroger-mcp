@@ -6,6 +6,8 @@ export const cadenceDays: Record<Cadence, number> = {
   monthly: 30,
 };
 
+const MS_PER_DAY = 86_400_000;
+
 // Grace window so a "weekly" order on day 6 still counts as due — humans don't
 // hit a precise 7-day cadence, and skipping a week because we're 12 hours short
 // is annoying.
@@ -15,7 +17,7 @@ export function isDue(item: UsualItem, now = Date.now()): boolean {
   if (!item.lastOrdered) return true;
   const last = Date.parse(item.lastOrdered);
   if (Number.isNaN(last)) return true;
-  const dueAt = last + (cadenceDays[item.cadence] - GRACE_DAYS) * 86_400_000;
+  const dueAt = last + (cadenceDays[item.cadence] - GRACE_DAYS) * MS_PER_DAY;
   return now >= dueAt;
 }
 

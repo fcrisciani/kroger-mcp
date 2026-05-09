@@ -77,4 +77,34 @@ describe("upsertUsualItem", () => {
     expect(updated.addedBy).toBeUndefined();
     expect(updated.defaultQty).toBe(3);
   });
+
+  it("preserves timesOrdered and lastOrdered when a tool updates an existing item", async () => {
+    // Seed with a well-loved item that has order history.
+    const seeded = {
+      items: [
+        {
+          ...milk,
+          timesOrdered: 12,
+          lastOrdered: "2026-04-30T10:00:00Z",
+          addedBy: "alice@example.com",
+        },
+      ],
+      updatedAt: "2026-04-30T10:00:00Z",
+    };
+    await kv.put("prefs:usual_items", JSON.stringify(seeded));
+
+    // Simulate an `add_usual_item` call from the tool layer, which always
+    // passes timesOrdered: 0 (and never passes lastOrdered).
+    const updated = await upsertUsualItem(env, {
+      ...milk,
+      defaultQty: 4,
+      timesOrdered: 0,
+      addedBy: "bob@example.com",
+    });
+
+    expect(updated.timesOrdered).toBe(12);
+    expect(updated.lastOrdered).toBe("2026-04-30T10:00:00Z");
+    expect(updated.defaultQty).toBe(4);
+    expect(updated.addedBy).toBe("alice@example.com");
+  });
 });
