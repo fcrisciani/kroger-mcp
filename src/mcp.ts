@@ -10,9 +10,9 @@ import {
 import {
   getDefaultLocationId,
   getUsualItems,
+  patchUsualItem,
   recordOrderedItems,
   removeUsualItem,
-  saveUsualItems,
   setDefaultLocationId,
   upsertUsualItem,
 } from "./storage.js";
@@ -209,14 +209,13 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         notes: z.string().optional(),
       },
       async ({ productId, defaultQty, cadence, notes }) => {
-        const doc = await getUsualItems(env);
-        const item = doc.items.find((i) => i.productId === productId);
-        if (!item) return { content: [{ type: "text", text: "No matching item." }] };
-        if (defaultQty !== undefined) item.defaultQty = defaultQty;
-        if (cadence !== undefined) item.cadence = cadence;
-        if (notes !== undefined) item.notes = notes;
-        await saveUsualItems(env, doc);
-        return { content: [{ type: "text", text: `Updated ${item.name}.` }] };
+        const patch: Parameters<typeof patchUsualItem>[2] = {};
+        if (defaultQty !== undefined) patch.defaultQty = defaultQty;
+        if (cadence !== undefined) patch.cadence = cadence;
+        if (notes !== undefined) patch.notes = notes;
+        const updated = await patchUsualItem(env, productId, patch);
+        if (!updated) return { content: [{ type: "text", text: "No matching item." }] };
+        return { content: [{ type: "text", text: `Updated ${updated.name}.` }] };
       },
     );
 

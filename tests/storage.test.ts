@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getUsualItems, upsertUsualItem } from "../src/storage.js";
+import { getUsualItems, patchUsualItem, upsertUsualItem } from "../src/storage.js";
 import type { Env } from "../src/types.js";
 
 class MemoryKV {
@@ -106,5 +106,48 @@ describe("upsertUsualItem", () => {
     expect(updated.lastOrdered).toBe("2026-04-30T10:00:00Z");
     expect(updated.defaultQty).toBe(4);
     expect(updated.addedBy).toBe("alice@example.com");
+  });
+});
+
+describe("patchUsualItem", () => {
+  let kv: MemoryKV;
+  let env: Env;
+  beforeEach(() => {
+    kv = new MemoryKV();
+    env = makeEnv(kv);
+  });
+
+  it("returns null when the productId doesn't exist", async () => {
+    const result = await patchUsualItem(env, "nope", { defaultQty: 2 });
+    expect(result).toBeNull();
+  });
+
+  it("applies a partial update without touching history or addedBy", async () => {
+    const seeded = {
+      items: [
+        {
+          ...milk,
+          timesOrdered: 7,
+          lastOrdered: "2026-04-15T12:00:00Z",
+          addedBy: "alice@example.com",
+          notes: "1% only",
+        },
+      ],
+      updatedAt: "2026-04-15T12:00:00Z",
+    };
+    await kv.put("prefs:usual_items", JSON.stringify(seeded));
+
+    const updated = await patchUsualItem(env, milk.productId, {
+      defaultQty: 2,
+      cadence: "biweekly",
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated!.defaultQty).toBe(2);
+    expect(updated!.cadence).toBe("biweekly");
+    expect(updated!.notes).toBe("1% only");
+    expect(updated!.timesOrdered).toBe(7);
+    expect(updated!.lastOrdered).toBe("2026-04-15T12:00:00Z");
+    expect(updated!.addedBy).toBe("alice@example.com");
   });
 });

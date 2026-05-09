@@ -78,6 +78,23 @@ export async function upsertUsualItem(env: Env, item: UsualItem): Promise<UsualI
   return doc.items.find((i) => i.productId === item.productId)!;
 }
 
+// Apply a partial update to an existing item without touching the protected
+// fields (addedBy / timesOrdered / lastOrdered). Use this for tools that just
+// tweak knobs like quantity or cadence — going through upsertUsualItem would
+// require fabricating a full UsualItem just to throw most of it away.
+export async function patchUsualItem(
+  env: Env,
+  productId: string,
+  patch: Partial<Omit<UsualItem, "productId" | "addedBy" | "timesOrdered" | "lastOrdered">>,
+): Promise<UsualItem | null> {
+  const doc = await getUsualItems(env);
+  const idx = doc.items.findIndex((i) => i.productId === productId);
+  if (idx < 0) return null;
+  doc.items[idx] = { ...doc.items[idx]!, ...patch };
+  await saveUsualItems(env, doc);
+  return doc.items[idx]!;
+}
+
 export async function removeUsualItem(env: Env, productId: string): Promise<boolean> {
   const doc = await getUsualItems(env);
   const before = doc.items.length;

@@ -58,14 +58,22 @@ export async function identifyUser(request: Request, env: Env): Promise<AccessId
     }
   }
 
+  // Surface a misconfigured deploy with a clear 500 before doing anything that
+  // depends on these vars. This way an operator who forgot to set the Access
+  // vars sees the right error on their first request, not "missing JWT" which
+  // points them in the wrong direction.
+  if (!env.CF_ACCESS_TEAM_DOMAIN || !env.CF_ACCESS_AUD) {
+    throw new AccessAuthError(
+      "Worker is misconfigured: CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD must be set.",
+      500,
+    );
+  }
+
   const jwt = request.headers.get(ACCESS_JWT_HEADER);
   if (!jwt) {
     throw new AccessAuthError(
       "Missing Cf-Access-Jwt-Assertion. This Worker must be deployed behind Cloudflare Access.",
     );
-  }
-  if (!env.CF_ACCESS_TEAM_DOMAIN || !env.CF_ACCESS_AUD) {
-    throw new AccessAuthError("Worker is misconfigured: CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD must be set.", 500);
   }
 
   const { payload } = await jwtVerify(jwt, jwksFor(env.CF_ACCESS_TEAM_DOMAIN), {
