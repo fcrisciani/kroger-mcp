@@ -1,0 +1,6 @@
+# Copy to .dev.vars and fill in. Never commit .dev.vars.
+KROGER_CLIENT_ID=
+KROGER_CLIENT_SECRET=
+OWNER_EMAIL=you@example.com
+OWNER_PASSWORD=change-me
+COOKIE_ENCRYPTION_KEY=generate-a-random-32-byte-string

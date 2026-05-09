@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kroger-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-09",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Public URL of the deployed Worker. Used to build the Kroger OAuth redirect URI
+  // (must match exactly what is registered in your Kroger app: <BASE_URL>/kroger/callback).
+  "vars": {
+    "BASE_URL": "https://kroger-mcp.<your-subdomain>.workers.dev"
+  },
+
+  // Two KV namespaces:
+  //   OAUTH_KV  → required by @cloudflare/workers-oauth-provider for grants/tokens
+  //   KROGER_KV → our own: Kroger refresh token, default location, usual-items list
+  // Run `npm run kv:create` and paste the returned IDs here.
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" },
+    { "binding": "KROGER_KV", "id": "REPLACE_WITH_KROGER_KV_ID" }
+  ],
+
+  // McpAgent uses a Durable Object for per-session state.
+  "durable_objects": {
+    "bindings": [{ "name": "MCP_OBJECT", "class_name": "KrogerMCP" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["KrogerMCP"] }
+  ],
+
+  "observability": { "enabled": true }
+
+  // Secrets (set with `wrangler secret put <NAME>`):
+  //   KROGER_CLIENT_ID
+  //   KROGER_CLIENT_SECRET
+  //   OWNER_EMAIL              — single allowed user for the MCP login screen
+  //   OWNER_PASSWORD           — login password for the MCP login screen
+  //   COOKIE_ENCRYPTION_KEY    — random 32+ byte string for OAuth provider cookies
+}
