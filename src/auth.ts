@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import type { MiddlewareHandler } from "hono";
 import { html } from "hono/html";
+import { AccessAuthError, identifyUser } from "./access.js";
 import {
   buildAuthorizeUrl,
   exchangeAuthorizationCode,
@@ -28,96 +28,61 @@ app.get("/", (c) => {
       </head>
       <body>
         <h1>Kroger MCP</h1>
-        <p>Personal MCP server for the Kroger Public API. To use:</p>
+        <p>Shared-household MCP for the Kroger Public API. To use:</p>
         <ol>
-          <li>Connect a Kroger account: <a href="/kroger/connect">/kroger/connect</a></li>
-          <li>In Claude.ai, add this Worker as a remote MCP connector. The OAuth flow will land you on the login screen.</li>
+          <li>Any family member connects the household Kroger account once: <a href="/kroger/connect">/kroger/connect</a> (requires Cloudflare Access login).</li>
+          <li>Each family member adds this Worker as a remote MCP connector in Claude.ai. The OAuth flow lands them on Cloudflare Access SSO; once they're in, Claude gets a token bound to their email.</li>
         </ol>
       </body>
     </html>`);
 });
 
-// ---------- Owner login (the OAuth provider's authorize endpoint) ----------
+// ---------- Family-member login (the OAuth provider's authorize endpoint) ----------
 //
-// workers-oauth-provider routes /authorize requests to the default handler
-// when the user is not yet authenticated. We render a login form, validate
-// against OWNER_EMAIL/OWNER_PASSWORD, then call completeAuthorization to
-// redirect back to Claude.ai with an auth code.
+// Cloudflare Access protects this path. By the time the request reaches us,
+// the user has already authenticated through Access (Google / OTP / whatever
+// is configured). We read their identity from the Access JWT and immediately
+// complete the OAuth grant — no second password prompt.
+//
+// Access policy must protect /authorize and /kroger/* but NOT /sse or /mcp;
+// those are server-to-server calls from Claude using the bearer token issued
+// here, so Access would block them.
 
 app.get("/authorize", async (c) => {
   const oauthReq = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
   const client = await c.env.OAUTH_PROVIDER.lookupClient(oauthReq.clientId);
   if (!client) return c.text("unknown client", 400);
 
-  // Encode the OAuth request so we can round-trip it through the form.
-  const stateBlob = btoa(JSON.stringify(oauthReq));
-  return c.html(html`<!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>Sign in to Kroger MCP</title>
-        <style>
-          body { font-family: system-ui, sans-serif; max-width: 360px; margin: 6rem auto; padding: 0 1rem; }
-          input { width: 100%; padding: 0.5rem; margin: 0.25rem 0 0.75rem; box-sizing: border-box; }
-          button { padding: 0.5rem 1rem; }
-          .err { color: #b00020; margin-bottom: 1rem; }
-          .who { color: #666; font-size: 0.9rem; }
-        </style>
-      </head>
-      <body>
-        <h1>Sign in</h1>
-        <p class="who">Authorizing <b>${client.clientName ?? client.clientId}</b> to access your Kroger MCP.</p>
-        <form method="post" action="/authorize">
-          <label>Email<input name="email" type="email" required autofocus /></label>
-          <label>Password<input name="password" type="password" required /></label>
-          <input type="hidden" name="oauth_req" value="${stateBlob}" />
-          <button type="submit">Continue</button>
-        </form>
-      </body>
-    </html>`);
-});
-
-app.post("/authorize", async (c) => {
-  const form = await c.req.formData();
-  const email = String(form.get("email") ?? "");
-  const password = String(form.get("password") ?? "");
-  const oauthReqEncoded = String(form.get("oauth_req") ?? "");
-  if (!oauthReqEncoded) return c.text("missing oauth_req", 400);
-
-  const oauthReq = JSON.parse(atob(oauthReqEncoded));
-
-  const owner = c.env.OWNER_EMAIL;
-  const ok =
-    email.length > 0 &&
-    password.length > 0 &&
-    timingSafeEqual(email, owner) &&
-    timingSafeEqual(password, c.env.OWNER_PASSWORD);
-  if (!ok) {
-    return c.html(
-      html`<p class="err">Invalid email or password.</p><p><a href="javascript:history.back()">Back</a></p>`,
-      401,
-    );
+  let identity;
+  try {
+    identity = await identifyUser(c.req.raw, c.env);
+  } catch (err) {
+    return accessErrorResponse(err);
   }
 
   const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
     request: oauthReq,
-    userId: owner,
-    metadata: { email: owner },
+    userId: identity.email,
+    metadata: { email: identity.email },
     scope: oauthReq.scope,
-    props: { userId: owner, email: owner },
+    props: { userId: identity.email, email: identity.email },
   });
   return c.redirect(redirectTo);
 });
 
 // ---------- Kroger OAuth (worker → Kroger) ----------
 //
-// One-time consent flow. Owner-protected via Basic Auth so only you can
-// initiate it from a browser. The callback uses `state` to find the stored
-// PKCE verifier in KV.
-
-app.use("/kroger/connect", basicAuthMiddleware());
+// One-time household consent. Any family member with Access can run this — the
+// resulting refresh token is shared. State carries the PKCE verifier through
+// the Kroger redirect.
 
 app.get("/kroger/connect", async (c) => {
+  try {
+    await identifyUser(c.req.raw, c.env);
+  } catch (err) {
+    return accessErrorResponse(err);
+  }
+
   const { verifier, challenge } = await generatePkcePair();
   const state = crypto.randomUUID();
   await c.env.KROGER_KV.put(`pkce:${state}`, verifier, { expirationTtl: 600 });
@@ -154,38 +119,18 @@ app.get("/kroger/callback", async (c) => {
   return c.html(html`<!doctype html>
     <html><body style="font-family: system-ui, sans-serif; max-width: 480px; margin: 4rem auto;">
       <h1>Kroger account connected</h1>
-      <p>You can close this tab and return to Claude.</p>
+      <p>The household Kroger account is wired up. Family members can now use Claude to add items.</p>
     </body></html>`);
 });
 
-// ---------- helpers ----------
-
-function basicAuthMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
-  return async (c, next) => {
-    const header = c.req.raw.headers.get("authorization") ?? "";
-    if (!header.startsWith("Basic ")) {
-      return new Response("auth required", {
-        status: 401,
-        headers: { "WWW-Authenticate": 'Basic realm="kroger-mcp"' },
-      });
-    }
-    const decoded = atob(header.slice(6));
-    const idx = decoded.indexOf(":");
-    if (idx < 0) return c.text("malformed", 401);
-    const user = decoded.slice(0, idx);
-    const pass = decoded.slice(idx + 1);
-    if (!timingSafeEqual(user, c.env.OWNER_EMAIL) || !timingSafeEqual(pass, c.env.OWNER_PASSWORD)) {
-      return c.text("forbidden", 403);
-    }
-    await next();
-  };
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+function accessErrorResponse(err: unknown): Response {
+  if (err instanceof AccessAuthError) {
+    return new Response(err.message, { status: err.status });
+  }
+  // Don't echo arbitrary error messages back — `jose` errors and similar can
+  // leak internals. Anything that isn't an AccessAuthError counts as
+  // unexpected and gets a generic 401.
+  return new Response("Authentication failed.", { status: 401 });
 }
 
 export default app;

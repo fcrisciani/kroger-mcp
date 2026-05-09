@@ -62,12 +62,37 @@ export async function upsertUsualItem(env: Env, item: UsualItem): Promise<UsualI
   const doc = await getUsualItems(env);
   const idx = doc.items.findIndex((i) => i.productId === item.productId);
   if (idx >= 0) {
-    doc.items[idx] = { ...doc.items[idx]!, ...item };
+    // Updates from the user-facing tools must not clobber three derived/
+    // historical fields:
+    //   - addedBy:      tracks the original creator, not the latest editor
+    //   - timesOrdered: bumped only by recordOrderedItems on real cart adds
+    //   - lastOrdered:  same — set only when the item lands in a Kroger cart
+    // add_usual_item hardcodes timesOrdered: 0, so without this stripping
+    // an "update" call would silently reset every item's order history.
+    const { addedBy: _a, timesOrdered: _t, lastOrdered: _l, ...updates } = item;
+    doc.items[idx] = { ...doc.items[idx]!, ...updates };
   } else {
     doc.items.push(item);
   }
   await saveUsualItems(env, doc);
   return doc.items.find((i) => i.productId === item.productId)!;
+}
+
+// Apply a partial update to an existing item without touching the protected
+// fields (addedBy / timesOrdered / lastOrdered). Use this for tools that just
+// tweak knobs like quantity or cadence — going through upsertUsualItem would
+// require fabricating a full UsualItem just to throw most of it away.
+export async function patchUsualItem(
+  env: Env,
+  productId: string,
+  patch: Partial<Omit<UsualItem, "productId" | "addedBy" | "timesOrdered" | "lastOrdered">>,
+): Promise<UsualItem | null> {
+  const doc = await getUsualItems(env);
+  const idx = doc.items.findIndex((i) => i.productId === productId);
+  if (idx < 0) return null;
+  doc.items[idx] = { ...doc.items[idx]!, ...patch };
+  await saveUsualItems(env, doc);
+  return doc.items[idx]!;
 }
 
 export async function removeUsualItem(env: Env, productId: string): Promise<boolean> {

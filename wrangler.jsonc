@@ -2,13 +2,21 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kroger-mcp",
   "main": "src/index.ts",
-  "compatibility_date": "2025-01-09",
+  "compatibility_date": "2026-04-15",
   "compatibility_flags": ["nodejs_compat"],
 
   // Public URL of the deployed Worker. Used to build the Kroger OAuth redirect URI
   // (must match exactly what is registered in your Kroger app: <BASE_URL>/kroger/callback).
+  //
+  // CF_ACCESS_TEAM_DOMAIN: your Cloudflare Access team subdomain (the
+  //   "<team>" in <team>.cloudflareaccess.com). Family member identity comes
+  //   from the Access JWT issued by this team.
+  // CF_ACCESS_AUD: the AUD tag of the Access Application that fronts this
+  //   Worker. Found in Zero Trust → Access → Applications → your app.
   "vars": {
-    "BASE_URL": "https://kroger-mcp.<your-subdomain>.workers.dev"
+    "BASE_URL": "https://kroger-mcp.<your-subdomain>.workers.dev",
+    "CF_ACCESS_TEAM_DOMAIN": "<your-team>",
+    "CF_ACCESS_AUD": "<your-application-aud>"
   },
 
   // Two KV namespaces:
@@ -33,7 +41,7 @@
   // Secrets (set with `wrangler secret put <NAME>`):
   //   KROGER_CLIENT_ID
   //   KROGER_CLIENT_SECRET
-  //   OWNER_EMAIL              — single allowed user for the MCP login screen
-  //   OWNER_PASSWORD           — login password for the MCP login screen
-  //   COOKIE_ENCRYPTION_KEY    — random 32+ byte string for OAuth provider cookies
+  //
+  // Identity: provided by the Cloudflare Access JWT on each request. Manage
+  // the family-member allowlist in the Access policy, not in code.
 }

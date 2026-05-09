@@ -1,6 +1,11 @@
 # Copy to .dev.vars and fill in. Never commit .dev.vars.
+
+# Kroger app credentials (from developer.kroger.com)
 KROGER_CLIENT_ID=
 KROGER_CLIENT_SECRET=
-OWNER_EMAIL=you@example.com
-OWNER_PASSWORD=change-me
-COOKIE_ENCRYPTION_KEY=generate-a-random-32-byte-string
+
+# Local dev only: bypass Cloudflare Access verification on /authorize and
+# pretend you logged in as this email. Only honored when the request hits
+# the Worker via localhost — never effective in production. Don't set in
+# `wrangler secret put` for the deployed Worker.
+DEV_AUTH_EMAIL=you@example.com

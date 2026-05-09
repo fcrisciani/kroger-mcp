@@ -154,7 +154,6 @@ export interface KrogerProduct {
   regularPrice?: number;
   promoPrice?: number;
   onSale: boolean;
-  imageUrl?: string;
 }
 
 interface RawProduct {
@@ -168,7 +167,6 @@ interface RawProduct {
     size?: string;
     price?: { regular?: number; promo?: number };
   }>;
-  images?: Array<{ perspective?: string; sizes?: Array<{ size?: string; url?: string }> }>;
 }
 
 function normalizeProduct(p: RawProduct): KrogerProduct {
@@ -176,8 +174,6 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
   const regular = item?.price?.regular;
   const promo = item?.price?.promo;
   const onSale = !!(promo && promo > 0 && regular && promo < regular);
-  const front = p.images?.find((i) => i.perspective === "front") ?? p.images?.[0];
-  const imageUrl = front?.sizes?.find((s) => s.size === "medium")?.url ?? front?.sizes?.[0]?.url;
   return {
     productId: p.productId,
     upc: p.upc,
@@ -188,7 +184,6 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
     regularPrice: regular,
     promoPrice: promo && promo > 0 ? promo : undefined,
     onSale,
-    imageUrl,
   };
 }
 
@@ -211,24 +206,43 @@ export async function searchProducts(
   return json.data.map(normalizeProduct);
 }
 
+// Kroger's `filter.productId` accepts a comma-separated list, but
+// `filter.limit` caps at 50 and the API silently drops anything past that. We
+// chunk to keep callers honest — if you ask for 200 productIds, you get 200
+// results back (or whatever subset Kroger has data for at this location).
+const PRODUCTS_BY_ID_CHUNK = 50;
+
 export async function getProductsByIds(
   env: Env,
   args: { productIds: string[]; locationId?: string },
 ): Promise<KrogerProduct[]> {
   if (args.productIds.length === 0) return [];
   const token = await getClientCredentialsToken(env);
-  // Kroger's products endpoint takes a single productId path or filter.productId list (comma-separated).
-  const params = new URLSearchParams({
-    "filter.productId": args.productIds.join(","),
-    "filter.limit": String(Math.min(50, args.productIds.length)),
-  });
-  if (args.locationId) params.set("filter.locationId", args.locationId);
-  const res = await fetch(`${KROGER_BASE}/products?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`getProductsByIds failed: ${res.status} ${await res.text()}`);
-  const json = (await res.json()) as { data: RawProduct[] };
-  return json.data.map(normalizeProduct);
+
+  const batches: string[][] = [];
+  for (let i = 0; i < args.productIds.length; i += PRODUCTS_BY_ID_CHUNK) {
+    batches.push(args.productIds.slice(i, i + PRODUCTS_BY_ID_CHUNK));
+  }
+
+  // Parallel fan-out is safe at our scale (<10 chunks per call). If we ever
+  // grow to hundreds of chunks per call we'd want to throttle to stay under
+  // Kroger's rate limits, but that's not a near-term concern.
+  const results = await Promise.all(
+    batches.map(async (batch) => {
+      const params = new URLSearchParams({
+        "filter.productId": batch.join(","),
+        "filter.limit": String(batch.length),
+      });
+      if (args.locationId) params.set("filter.locationId", args.locationId);
+      const res = await fetch(`${KROGER_BASE}/products?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`getProductsByIds failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { data: RawProduct[] };
+      return json.data.map(normalizeProduct);
+    }),
+  );
+  return results.flat();
 }
 
 export interface CartItemInput {

@@ -6,43 +6,20 @@ import {
   findLocations,
   getProductsByIds,
   searchProducts,
-  type KrogerProduct,
 } from "./kroger.js";
 import {
   getDefaultLocationId,
   getUsualItems,
-  recordOrderedItems,
+  patchUsualItem,
   removeUsualItem,
-  saveUsualItems,
   setDefaultLocationId,
   upsertUsualItem,
 } from "./storage.js";
-import type { Cadence, Env, SessionProps, UsualItem } from "./types.js";
+import type { Env, SessionProps } from "./types.js";
+import { runWeeklyOrder } from "./weekly-order.js";
+import { isDue, priceLine } from "./util.js";
 
 const CHECKOUT_URL = "https://www.kroger.com/cart";
-
-const cadenceDays: Record<Cadence, number> = {
-  weekly: 7,
-  biweekly: 14,
-  monthly: 30,
-};
-
-function isDue(item: UsualItem, now = Date.now()): boolean {
-  if (!item.lastOrdered) return true;
-  const last = Date.parse(item.lastOrdered);
-  if (Number.isNaN(last)) return true;
-  // Subtract a 1-day grace window so a "weekly" order on day 6 still counts as due.
-  const dueAt = last + (cadenceDays[item.cadence] - 1) * 86_400_000;
-  return now >= dueAt;
-}
-
-function priceLine(p: KrogerProduct): string {
-  if (p.onSale && p.promoPrice && p.regularPrice) {
-    return `$${p.promoPrice.toFixed(2)} (sale, was $${p.regularPrice.toFixed(2)})`;
-  }
-  if (p.regularPrice) return `$${p.regularPrice.toFixed(2)}`;
-  return "price unavailable at this location";
-}
 
 export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
   server = new McpServer({ name: "kroger-mcp", version: "0.1.0" });
@@ -161,7 +138,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "list_usual_items",
-      "List the user's recurring grocery items. Set onlyDue=true to filter to items whose cadence makes them due to reorder.",
+      "List the household's shared recurring grocery items. Set onlyDue=true to filter to items whose cadence makes them due to reorder. Each entry shows which family member added it.",
       { onlyDue: z.boolean().optional() },
       async ({ onlyDue }) => {
         const doc = await getUsualItems(env);
@@ -173,7 +150,8 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           .map((i) => {
             const due = isDue(i) ? "DUE" : "ok";
             const last = i.lastOrdered ?? "never";
-            return `[${due}] ${i.name} — qty ${i.defaultQty}, ${i.cadence}, last ${last}, productId=${i.productId}`;
+            const by = i.addedBy ? ` · added by ${i.addedBy}` : "";
+            return `[${due}] ${i.name} — qty ${i.defaultQty}, ${i.cadence}, last ${last}${by}, productId=${i.productId}`;
           })
           .join("\n");
         return { content: [{ type: "text", text }] };
@@ -182,7 +160,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "add_usual_item",
-      "Add or update an item in the recurring list. Use search_products to find a productId first.",
+      "Add or update an item in the shared household recurring list. The caller's email is recorded as `addedBy`. Use search_products to find a productId first.",
       {
         productId: z.string().min(1),
         name: z.string().min(1),
@@ -198,8 +176,16 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           cadence: args.cadence,
           notes: args.notes,
           timesOrdered: 0,
+          addedBy: this.props.email,
         });
-        return { content: [{ type: "text", text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}).` }] };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}${item.addedBy ? `, added by ${item.addedBy}` : ""}).`,
+            },
+          ],
+        };
       },
     );
 
@@ -223,14 +209,13 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         notes: z.string().optional(),
       },
       async ({ productId, defaultQty, cadence, notes }) => {
-        const doc = await getUsualItems(env);
-        const item = doc.items.find((i) => i.productId === productId);
-        if (!item) return { content: [{ type: "text", text: "No matching item." }] };
-        if (defaultQty !== undefined) item.defaultQty = defaultQty;
-        if (cadence !== undefined) item.cadence = cadence;
-        if (notes !== undefined) item.notes = notes;
-        await saveUsualItems(env, doc);
-        return { content: [{ type: "text", text: `Updated ${item.name}.` }] };
+        const patch: Parameters<typeof patchUsualItem>[2] = {};
+        if (defaultQty !== undefined) patch.defaultQty = defaultQty;
+        if (cadence !== undefined) patch.cadence = cadence;
+        if (notes !== undefined) patch.notes = notes;
+        const updated = await patchUsualItem(env, productId, patch);
+        if (!updated) return { content: [{ type: "text", text: "No matching item." }] };
+        return { content: [{ type: "text", text: `Updated ${updated.name}.` }] };
       },
     );
 
@@ -243,63 +228,9 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         includeAll: z.boolean().optional(),
         modality: z.enum(["PICKUP", "DELIVERY"]).optional(),
       },
-      async ({ includeAll, modality }) => {
-        const doc = await getUsualItems(env);
-        const candidates = includeAll ? doc.items : doc.items.filter((i) => isDue(i));
-        if (candidates.length === 0) {
-          return { content: [{ type: "text", text: "No items are due to reorder. Pass includeAll=true to add the full list anyway." }] };
-        }
-        const locationId = (await getDefaultLocationId(env)) ?? undefined;
-        const products = await getProductsByIds(env, {
-          productIds: candidates.map((i) => i.productId),
-          locationId,
-        });
-        const byProductId = new Map(products.map((p) => [p.productId, p]));
-
-        const cartItems = candidates
-          .map((u) => {
-            const p = byProductId.get(u.productId);
-            return p ? { upc: p.upc, quantity: u.defaultQty, modality } : null;
-          })
-          .filter((x): x is NonNullable<typeof x> => x !== null);
-
-        if (cartItems.length === 0) {
-          return { content: [{ type: "text", text: "Could not resolve any of the due items at the current store." }] };
-        }
-
-        await addItemsToCart(env, cartItems);
-        await recordOrderedItems(env, candidates.map((c) => c.productId));
-
-        const lines: string[] = [];
-        const sales: string[] = [];
-        let total = 0;
-        let priced = 0;
-        for (const u of candidates) {
-          const p = byProductId.get(u.productId);
-          if (!p) {
-            lines.push(`! ${u.name} — not available at this store, skipped`);
-            continue;
-          }
-          const each = p.onSale && p.promoPrice ? p.promoPrice : p.regularPrice;
-          if (each !== undefined) {
-            total += each * u.defaultQty;
-            priced++;
-          }
-          lines.push(`• ${u.defaultQty} × ${p.description} — ${priceLine(p)}`);
-          if (p.onSale) sales.push(`  ${p.description} — on sale at $${p.promoPrice?.toFixed(2)}`);
-        }
-
-        const summary = [
-          `Added ${cartItems.length} item(s) to your Kroger cart.`,
-          ...lines,
-          priced > 0 ? `\nEstimated subtotal (priced items only): $${total.toFixed(2)}` : "",
-          sales.length > 0 ? `\nOn sale this week:\n${sales.join("\n")}` : "",
-          `\nReview & checkout: ${CHECKOUT_URL}`,
-        ]
-          .filter(Boolean)
-          .join("\n");
-
-        return { content: [{ type: "text", text: summary }] };
+      async (args) => {
+        const text = await runWeeklyOrder(env, args);
+        return { content: [{ type: "text", text }] };
       },
     );
 
@@ -319,8 +250,9 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         const products = await getProductsByIds(env, { productIds: doc.items.map((i) => i.productId), locationId });
         const onSale = products.filter((p) => p.onSale);
         if (onSale.length === 0) return { content: [{ type: "text", text: "Nothing on sale right now." }] };
+        // normalizeProduct guarantees both prices are defined when onSale is true.
         const text = onSale
-          .map((p) => `• ${p.description} — $${p.promoPrice?.toFixed(2)} (was $${p.regularPrice?.toFixed(2)})`)
+          .map((p) => `• ${p.description} — $${p.promoPrice!.toFixed(2)} (was $${p.regularPrice!.toFixed(2)})`)
           .join("\n");
         return { content: [{ type: "text", text: `On sale at your store:\n${text}` }] };
       },

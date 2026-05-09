@@ -6,12 +6,14 @@ export interface Env {
   MCP_OBJECT: DurableObjectNamespace;
   // Vars
   BASE_URL: string;
+  // Cloudflare Access — needed for JWT verification on /authorize
+  CF_ACCESS_TEAM_DOMAIN: string;   // e.g. "myorg" for myorg.cloudflareaccess.com
+  CF_ACCESS_AUD: string;           // Access Application AUD tag
   // Secrets
   KROGER_CLIENT_ID: string;
   KROGER_CLIENT_SECRET: string;
-  OWNER_EMAIL: string;
-  OWNER_PASSWORD: string;
-  COOKIE_ENCRYPTION_KEY: string;
+  // Optional: dev-only override that bypasses Access verification when set.
+  DEV_AUTH_EMAIL?: string;
   // Injected by @cloudflare/workers-oauth-provider into apiHandlers
   OAUTH_PROVIDER: OAuthHelpers;
 }
@@ -63,6 +65,9 @@ export interface UsualItem {
   lastOrdered?: string;       // ISO timestamp
   timesOrdered: number;
   notes?: string;
+  // Email of the family member who added this item. Optional so that documents
+  // written before the multi-member migration still load cleanly.
+  addedBy?: string;
 }
 
 export interface UsualItemsDoc {
