@@ -79,6 +79,9 @@ export async function identifyUser(request: Request, env: Env): Promise<AccessId
   const { payload } = await jwtVerify(jwt, jwksFor(env.CF_ACCESS_TEAM_DOMAIN), {
     audience: env.CF_ACCESS_AUD,
     issuer: `https://${env.CF_ACCESS_TEAM_DOMAIN}.cloudflareaccess.com`,
+    // Cloudflare Access signs with RS256. Pinning rules out any future
+    // algorithm-confusion attack if the JWKS ever publishes more keys.
+    algorithms: ["RS256"],
   });
   const email = typeof payload.email === "string" ? payload.email : null;
   if (!email) throw new AccessAuthError("Access JWT did not include an email claim.");

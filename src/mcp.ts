@@ -241,30 +241,33 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         });
         const byProductId = new Map(products.map((p) => [p.productId, p]));
 
-        const cartItems = candidates
-          .map((u) => {
-            const p = byProductId.get(u.productId);
-            return p ? { upc: p.upc, quantity: u.defaultQty, modality } : null;
-          })
-          .filter((x): x is NonNullable<typeof x> => x !== null);
+        // Split candidates into "made it to the cart" vs "couldn't resolve".
+        // Only the former should have their lastOrdered/timesOrdered bumped —
+        // otherwise items that are temporarily unavailable at this store
+        // would silently be marked as ordered every week and disappear from
+        // the due list.
+        const resolved = candidates.filter((u) => byProductId.has(u.productId));
+        const unresolved = candidates.filter((u) => !byProductId.has(u.productId));
 
-        if (cartItems.length === 0) {
+        if (resolved.length === 0) {
           return { content: [{ type: "text", text: "Could not resolve any of the due items at the current store." }] };
         }
 
+        const cartItems = resolved.map((u) => ({
+          upc: byProductId.get(u.productId)!.upc,
+          quantity: u.defaultQty,
+          modality,
+        }));
+
         await addItemsToCart(env, cartItems);
-        await recordOrderedItems(env, candidates.map((c) => c.productId));
+        await recordOrderedItems(env, resolved.map((u) => u.productId));
 
         const lines: string[] = [];
         const sales: string[] = [];
         let total = 0;
         let priced = 0;
-        for (const u of candidates) {
-          const p = byProductId.get(u.productId);
-          if (!p) {
-            lines.push(`! ${u.name} — not available at this store, skipped`);
-            continue;
-          }
+        for (const u of resolved) {
+          const p = byProductId.get(u.productId)!;
           const each = p.onSale && p.promoPrice ? p.promoPrice : p.regularPrice;
           if (each !== undefined) {
             total += each * u.defaultQty;
@@ -272,6 +275,9 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           }
           lines.push(`• ${u.defaultQty} × ${p.description} — ${priceLine(p)}`);
           if (p.onSale) sales.push(`  ${p.description} — on sale at $${p.promoPrice?.toFixed(2)}`);
+        }
+        for (const u of unresolved) {
+          lines.push(`! ${u.name} — not available at this store, skipped (lastOrdered preserved)`);
         }
 
         const summary = [
