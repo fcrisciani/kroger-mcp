@@ -182,7 +182,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           content: [
             {
               type: "text",
-              text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}, added by ${item.addedBy}).`,
+              text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}${item.addedBy ? `, added by ${item.addedBy}` : ""}).`,
             },
           ],
         };
