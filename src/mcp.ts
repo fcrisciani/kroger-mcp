@@ -11,12 +11,12 @@ import {
   getDefaultLocationId,
   getUsualItems,
   patchUsualItem,
-  recordOrderedItems,
   removeUsualItem,
   setDefaultLocationId,
   upsertUsualItem,
 } from "./storage.js";
 import type { Env, SessionProps } from "./types.js";
+import { runWeeklyOrder } from "./weekly-order.js";
 import { isDue, priceLine } from "./util.js";
 
 const CHECKOUT_URL = "https://www.kroger.com/cart";
@@ -228,69 +228,9 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         includeAll: z.boolean().optional(),
         modality: z.enum(["PICKUP", "DELIVERY"]).optional(),
       },
-      async ({ includeAll, modality }) => {
-        const doc = await getUsualItems(env);
-        const candidates = includeAll ? doc.items : doc.items.filter((i) => isDue(i));
-        if (candidates.length === 0) {
-          return { content: [{ type: "text", text: "No items are due to reorder. Pass includeAll=true to add the full list anyway." }] };
-        }
-        const locationId = (await getDefaultLocationId(env)) ?? undefined;
-        const products = await getProductsByIds(env, {
-          productIds: candidates.map((i) => i.productId),
-          locationId,
-        });
-        const byProductId = new Map(products.map((p) => [p.productId, p]));
-
-        // Split candidates into "made it to the cart" vs "couldn't resolve".
-        // Only the former should have their lastOrdered/timesOrdered bumped —
-        // otherwise items that are temporarily unavailable at this store
-        // would silently be marked as ordered every week and disappear from
-        // the due list.
-        const resolved = candidates.filter((u) => byProductId.has(u.productId));
-        const unresolved = candidates.filter((u) => !byProductId.has(u.productId));
-
-        if (resolved.length === 0) {
-          return { content: [{ type: "text", text: "Could not resolve any of the due items at the current store." }] };
-        }
-
-        const cartItems = resolved.map((u) => ({
-          upc: byProductId.get(u.productId)!.upc,
-          quantity: u.defaultQty,
-          modality,
-        }));
-
-        await addItemsToCart(env, cartItems);
-        await recordOrderedItems(env, resolved.map((u) => u.productId));
-
-        const lines: string[] = [];
-        const sales: string[] = [];
-        let total = 0;
-        let priced = 0;
-        for (const u of resolved) {
-          const p = byProductId.get(u.productId)!;
-          const each = p.onSale && p.promoPrice ? p.promoPrice : p.regularPrice;
-          if (each !== undefined) {
-            total += each * u.defaultQty;
-            priced++;
-          }
-          lines.push(`• ${u.defaultQty} × ${p.description} — ${priceLine(p)}`);
-          if (p.onSale) sales.push(`  ${p.description} — on sale at $${p.promoPrice?.toFixed(2)}`);
-        }
-        for (const u of unresolved) {
-          lines.push(`! ${u.name} — not available at this store, skipped (lastOrdered preserved)`);
-        }
-
-        const summary = [
-          `Added ${cartItems.length} item(s) to your Kroger cart.`,
-          ...lines,
-          priced > 0 ? `\nEstimated subtotal (priced items only): $${total.toFixed(2)}` : "",
-          sales.length > 0 ? `\nOn sale this week:\n${sales.join("\n")}` : "",
-          `\nReview & checkout: ${CHECKOUT_URL}`,
-        ]
-          .filter(Boolean)
-          .join("\n");
-
-        return { content: [{ type: "text", text: summary }] };
+      async (args) => {
+        const text = await runWeeklyOrder(env, args);
+        return { content: [{ type: "text", text }] };
       },
     );
 
@@ -310,8 +250,9 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         const products = await getProductsByIds(env, { productIds: doc.items.map((i) => i.productId), locationId });
         const onSale = products.filter((p) => p.onSale);
         if (onSale.length === 0) return { content: [{ type: "text", text: "Nothing on sale right now." }] };
+        // normalizeProduct guarantees both prices are defined when onSale is true.
         const text = onSale
-          .map((p) => `• ${p.description} — $${p.promoPrice?.toFixed(2)} (was $${p.regularPrice?.toFixed(2)})`)
+          .map((p) => `• ${p.description} — $${p.promoPrice!.toFixed(2)} (was $${p.regularPrice!.toFixed(2)})`)
           .join("\n");
         return { content: [{ type: "text", text: `On sale at your store:\n${text}` }] };
       },

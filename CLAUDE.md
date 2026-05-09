@@ -130,7 +130,6 @@ and set `BASE_URL=http://localhost:8787` in `.dev.vars`.
 wrangler deploy
 wrangler secret put KROGER_CLIENT_ID
 wrangler secret put KROGER_CLIENT_SECRET
-wrangler secret put COOKIE_ENCRYPTION_KEY   # any random 32+ byte string
 ```
 
 Update `BASE_URL`, `CF_ACCESS_TEAM_DOMAIN`, and `CF_ACCESS_AUD` in

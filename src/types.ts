@@ -12,7 +12,6 @@ export interface Env {
   // Secrets
   KROGER_CLIENT_ID: string;
   KROGER_CLIENT_SECRET: string;
-  COOKIE_ENCRYPTION_KEY: string;
   // Optional: dev-only override that bypasses Access verification when set.
   DEV_AUTH_EMAIL?: string;
   // Injected by @cloudflare/workers-oauth-provider into apiHandlers

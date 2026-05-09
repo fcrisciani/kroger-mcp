@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kroger-mcp",
   "main": "src/index.ts",
-  "compatibility_date": "2025-01-09",
+  "compatibility_date": "2026-04-15",
   "compatibility_flags": ["nodejs_compat"],
 
   // Public URL of the deployed Worker. Used to build the Kroger OAuth redirect URI
@@ -41,7 +41,6 @@
   // Secrets (set with `wrangler secret put <NAME>`):
   //   KROGER_CLIENT_ID
   //   KROGER_CLIENT_SECRET
-  //   COOKIE_ENCRYPTION_KEY    — random 32+ byte string for OAuth provider cookies
   //
   // Identity: provided by the Cloudflare Access JWT on each request. Manage
   // the family-member allowlist in the Access policy, not in code.

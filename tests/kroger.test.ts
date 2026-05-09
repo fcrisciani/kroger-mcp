@@ -1,29 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getProductsByIds } from "../src/kroger.js";
 import type { Env } from "../src/types.js";
-
-class MemoryKV {
-  private store = new Map<string, string>();
-  async get(key: string, type?: "json"): Promise<unknown> {
-    const v = this.store.get(key);
-    if (v === undefined) return null;
-    return type === "json" ? JSON.parse(v) : v;
-  }
-  async put(key: string, value: string): Promise<void> {
-    this.store.set(key, value);
-  }
-  async delete(key: string): Promise<void> {
-    this.store.delete(key);
-  }
-}
-
-function makeEnv(kv: MemoryKV): Env {
-  return {
-    KROGER_KV: kv as unknown as KVNamespace,
-    KROGER_CLIENT_ID: "test",
-    KROGER_CLIENT_SECRET: "test",
-  } as unknown as Env;
-}
+import { makeEnv, MemoryKV } from "./helpers.js";
 
 function fakeProductsResponse(productIds: string[]): Response {
   return new Response(
@@ -49,7 +27,7 @@ describe("getProductsByIds", () => {
 
   beforeEach(async () => {
     kv = new MemoryKV();
-    env = makeEnv(kv);
+    env = makeEnv({ KROGER_KV: kv as unknown as KVNamespace });
     // Pre-cache a fresh client_credentials token so we don't hit the auth
     // endpoint during the test — we only want to assert behavior on the
     // /products call(s).

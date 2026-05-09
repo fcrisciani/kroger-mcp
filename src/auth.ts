@@ -30,7 +30,7 @@ app.get("/", (c) => {
         <h1>Kroger MCP</h1>
         <p>Shared-household MCP for the Kroger Public API. To use:</p>
         <ol>
-          <li>An owner connects the household Kroger account once: <a href="/kroger/connect">/kroger/connect</a> (requires Cloudflare Access login).</li>
+          <li>Any family member connects the household Kroger account once: <a href="/kroger/connect">/kroger/connect</a> (requires Cloudflare Access login).</li>
           <li>Each family member adds this Worker as a remote MCP connector in Claude.ai. The OAuth flow lands them on Cloudflare Access SSO; once they're in, Claude gets a token bound to their email.</li>
         </ol>
       </body>
@@ -127,7 +127,10 @@ function accessErrorResponse(err: unknown): Response {
   if (err instanceof AccessAuthError) {
     return new Response(err.message, { status: err.status });
   }
-  return new Response(`Auth failure: ${(err as Error).message ?? "unknown"}`, { status: 401 });
+  // Don't echo arbitrary error messages back — `jose` errors and similar can
+  // leak internals. Anything that isn't an AccessAuthError counts as
+  // unexpected and gets a generic 401.
+  return new Response("Authentication failed.", { status: 401 });
 }
 
 export default app;

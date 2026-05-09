@@ -4,10 +4,8 @@
 KROGER_CLIENT_ID=
 KROGER_CLIENT_SECRET=
 
-# Random 32+ byte string used by @cloudflare/workers-oauth-provider
-COOKIE_ENCRYPTION_KEY=generate-a-random-32-byte-string
-
 # Local dev only: bypass Cloudflare Access verification on /authorize and
-# pretend you logged in as this email. Never set in production — it would let
-# anyone hit the Worker URL directly and skip Access.
+# pretend you logged in as this email. Only honored when the request hits
+# the Worker via localhost — never effective in production. Don't set in
+# `wrangler secret put` for the deployed Worker.
 DEV_AUTH_EMAIL=you@example.com

@@ -1,28 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { getUsualItems, patchUsualItem, upsertUsualItem } from "../src/storage.js";
 import type { Env } from "../src/types.js";
-
-class MemoryKV {
-  private store = new Map<string, string>();
-  async get(key: string, type?: "json"): Promise<unknown> {
-    const v = this.store.get(key);
-    if (v === undefined) return null;
-    return type === "json" ? JSON.parse(v) : v;
-  }
-  async put(key: string, value: string): Promise<void> {
-    this.store.set(key, value);
-  }
-  async delete(key: string): Promise<void> {
-    this.store.delete(key);
-  }
-  raw(key: string): string | undefined {
-    return this.store.get(key);
-  }
-}
-
-function makeEnv(kv: MemoryKV): Env {
-  return { KROGER_KV: kv as unknown as KVNamespace } as unknown as Env;
-}
+import { makeEnv, MemoryKV } from "./helpers.js";
 
 const milk = {
   productId: "0001111041700",
@@ -37,7 +16,7 @@ describe("upsertUsualItem", () => {
   let env: Env;
   beforeEach(() => {
     kv = new MemoryKV();
-    env = makeEnv(kv);
+    env = makeEnv({ KROGER_KV: kv as unknown as KVNamespace });
   });
 
   it("stamps addedBy on creation", async () => {
@@ -114,7 +93,7 @@ describe("patchUsualItem", () => {
   let env: Env;
   beforeEach(() => {
     kv = new MemoryKV();
-    env = makeEnv(kv);
+    env = makeEnv({ KROGER_KV: kv as unknown as KVNamespace });
   });
 
   it("returns null when the productId doesn't exist", async () => {

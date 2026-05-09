@@ -154,7 +154,6 @@ export interface KrogerProduct {
   regularPrice?: number;
   promoPrice?: number;
   onSale: boolean;
-  imageUrl?: string;
 }
 
 interface RawProduct {
@@ -168,7 +167,6 @@ interface RawProduct {
     size?: string;
     price?: { regular?: number; promo?: number };
   }>;
-  images?: Array<{ perspective?: string; sizes?: Array<{ size?: string; url?: string }> }>;
 }
 
 function normalizeProduct(p: RawProduct): KrogerProduct {
@@ -176,8 +174,6 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
   const regular = item?.price?.regular;
   const promo = item?.price?.promo;
   const onSale = !!(promo && promo > 0 && regular && promo < regular);
-  const front = p.images?.find((i) => i.perspective === "front") ?? p.images?.[0];
-  const imageUrl = front?.sizes?.find((s) => s.size === "medium")?.url ?? front?.sizes?.[0]?.url;
   return {
     productId: p.productId,
     upc: p.upc,
@@ -188,7 +184,6 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
     regularPrice: regular,
     promoPrice: promo && promo > 0 ? promo : undefined,
     onSale,
-    imageUrl,
   };
 }
 
@@ -223,22 +218,31 @@ export async function getProductsByIds(
 ): Promise<KrogerProduct[]> {
   if (args.productIds.length === 0) return [];
   const token = await getClientCredentialsToken(env);
-  const out: KrogerProduct[] = [];
+
+  const batches: string[][] = [];
   for (let i = 0; i < args.productIds.length; i += PRODUCTS_BY_ID_CHUNK) {
-    const batch = args.productIds.slice(i, i + PRODUCTS_BY_ID_CHUNK);
-    const params = new URLSearchParams({
-      "filter.productId": batch.join(","),
-      "filter.limit": String(batch.length),
-    });
-    if (args.locationId) params.set("filter.locationId", args.locationId);
-    const res = await fetch(`${KROGER_BASE}/products?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(`getProductsByIds failed: ${res.status} ${await res.text()}`);
-    const json = (await res.json()) as { data: RawProduct[] };
-    for (const p of json.data) out.push(normalizeProduct(p));
+    batches.push(args.productIds.slice(i, i + PRODUCTS_BY_ID_CHUNK));
   }
-  return out;
+
+  // Parallel fan-out is safe at our scale (<10 chunks per call). If we ever
+  // grow to hundreds of chunks per call we'd want to throttle to stay under
+  // Kroger's rate limits, but that's not a near-term concern.
+  const results = await Promise.all(
+    batches.map(async (batch) => {
+      const params = new URLSearchParams({
+        "filter.productId": batch.join(","),
+        "filter.limit": String(batch.length),
+      });
+      if (args.locationId) params.set("filter.locationId", args.locationId);
+      const res = await fetch(`${KROGER_BASE}/products?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`getProductsByIds failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { data: RawProduct[] };
+      return json.data.map(normalizeProduct);
+    }),
+  );
+  return results.flat();
 }
 
 export interface CartItemInput {
