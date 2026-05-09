@@ -75,4 +75,8 @@ describe("priceLine", () => {
   it("ignores onSale=true if promo or regular price is missing (bad upstream data)", () => {
     expect(priceLine({ regularPrice: 4.99, onSale: true })).toBe("$4.99");
   });
+
+  it("renders a legitimate $0.00 regular price instead of falling back", () => {
+    expect(priceLine({ regularPrice: 0, onSale: false })).toBe("$0.00");
+  });
 });

@@ -26,9 +26,15 @@ export interface PriceableProduct {
 }
 
 export function priceLine(p: PriceableProduct): string {
-  if (p.onSale && p.promoPrice && p.regularPrice) {
+  // Use typeof checks so a legitimate $0.00 (free / loyalty-credit item) is
+  // rendered as a price rather than "price unavailable".
+  if (
+    p.onSale &&
+    typeof p.promoPrice === "number" &&
+    typeof p.regularPrice === "number"
+  ) {
     return `$${p.promoPrice.toFixed(2)} (sale, was $${p.regularPrice.toFixed(2)})`;
   }
-  if (p.regularPrice) return `$${p.regularPrice.toFixed(2)}`;
+  if (typeof p.regularPrice === "number") return `$${p.regularPrice.toFixed(2)}`;
   return "price unavailable at this location";
 }
