@@ -6,7 +6,6 @@ import {
   findLocations,
   getProductsByIds,
   searchProducts,
-  type KrogerProduct,
 } from "./kroger.js";
 import {
   getDefaultLocationId,
@@ -17,32 +16,10 @@ import {
   setDefaultLocationId,
   upsertUsualItem,
 } from "./storage.js";
-import type { Cadence, Env, SessionProps, UsualItem } from "./types.js";
+import type { Env, SessionProps } from "./types.js";
+import { isDue, priceLine } from "./util.js";
 
 const CHECKOUT_URL = "https://www.kroger.com/cart";
-
-const cadenceDays: Record<Cadence, number> = {
-  weekly: 7,
-  biweekly: 14,
-  monthly: 30,
-};
-
-function isDue(item: UsualItem, now = Date.now()): boolean {
-  if (!item.lastOrdered) return true;
-  const last = Date.parse(item.lastOrdered);
-  if (Number.isNaN(last)) return true;
-  // Subtract a 1-day grace window so a "weekly" order on day 6 still counts as due.
-  const dueAt = last + (cadenceDays[item.cadence] - 1) * 86_400_000;
-  return now >= dueAt;
-}
-
-function priceLine(p: KrogerProduct): string {
-  if (p.onSale && p.promoPrice && p.regularPrice) {
-    return `$${p.promoPrice.toFixed(2)} (sale, was $${p.regularPrice.toFixed(2)})`;
-  }
-  if (p.regularPrice) return `$${p.regularPrice.toFixed(2)}`;
-  return "price unavailable at this location";
-}
 
 export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
   server = new McpServer({ name: "kroger-mcp", version: "0.1.0" });
