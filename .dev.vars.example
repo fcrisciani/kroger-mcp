@@ -1,6 +1,13 @@
 # Copy to .dev.vars and fill in. Never commit .dev.vars.
+
+# Kroger app credentials (from developer.kroger.com)
 KROGER_CLIENT_ID=
 KROGER_CLIENT_SECRET=
-OWNER_EMAIL=you@example.com
-OWNER_PASSWORD=change-me
+
+# Random 32+ byte string used by @cloudflare/workers-oauth-provider
 COOKIE_ENCRYPTION_KEY=generate-a-random-32-byte-string
+
+# Local dev only: bypass Cloudflare Access verification on /authorize and
+# pretend you logged in as this email. Never set in production — it would let
+# anyone hit the Worker URL directly and skip Access.
+DEV_AUTH_EMAIL=you@example.com

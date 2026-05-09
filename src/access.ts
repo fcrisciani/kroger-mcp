@@ -1,0 +1,68 @@
+import { createRemoteJWKSet, jwtVerify } from "jose";
+import type { Env } from "./types.js";
+
+// Cloudflare Access puts the signed identity JWT in this header on every
+// request that successfully passed through Access.
+const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
+
+interface JwksCacheEntry {
+  team: string;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+}
+
+// One JWKS resolver per team domain, kept in module scope so it survives across
+// requests inside the same isolate (jose handles its own internal cache too).
+let jwksCache: JwksCacheEntry | null = null;
+
+function jwksFor(team: string) {
+  if (jwksCache?.team === team) return jwksCache.jwks;
+  const jwks = createRemoteJWKSet(
+    new URL(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`),
+  );
+  jwksCache = { team, jwks };
+  return jwks;
+}
+
+export interface AccessIdentity {
+  email: string;
+}
+
+export class AccessAuthError extends Error {
+  status: number;
+  constructor(message: string, status = 401) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Resolve the identity of the human currently driving the request.
+//
+// In production: verify the JWT Access stamped on the request. The team domain
+// + audience must match what's configured on the Access Application that
+// fronts this Worker.
+//
+// In local dev (no Access in front): if DEV_AUTH_EMAIL is set, trust it. This
+// is the only way to exercise the OAuth flow on `wrangler dev`. Don't set it
+// in production — it would let anyone bypass Access by hitting the Worker URL
+// directly.
+export async function identifyUser(request: Request, env: Env): Promise<AccessIdentity> {
+  if (env.DEV_AUTH_EMAIL) return { email: env.DEV_AUTH_EMAIL };
+
+  const jwt = request.headers.get(ACCESS_JWT_HEADER);
+  if (!jwt) {
+    throw new AccessAuthError(
+      "Missing Cf-Access-Jwt-Assertion. This Worker must be deployed behind Cloudflare Access.",
+    );
+  }
+  if (!env.CF_ACCESS_TEAM_DOMAIN || !env.CF_ACCESS_AUD) {
+    throw new AccessAuthError("Worker is misconfigured: CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD must be set.", 500);
+  }
+
+  const { payload } = await jwtVerify(jwt, jwksFor(env.CF_ACCESS_TEAM_DOMAIN), {
+    audience: env.CF_ACCESS_AUD,
+    issuer: `https://${env.CF_ACCESS_TEAM_DOMAIN}.cloudflareaccess.com`,
+  });
+  const email = typeof payload.email === "string" ? payload.email : null;
+  if (!email) throw new AccessAuthError("Access JWT did not include an email claim.");
+  return { email };
+}

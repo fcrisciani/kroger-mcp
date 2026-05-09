@@ -62,7 +62,10 @@ export async function upsertUsualItem(env: Env, item: UsualItem): Promise<UsualI
   const doc = await getUsualItems(env);
   const idx = doc.items.findIndex((i) => i.productId === item.productId);
   if (idx >= 0) {
-    doc.items[idx] = { ...doc.items[idx]!, ...item };
+    // addedBy tracks the original creator — don't let an update from another
+    // family member overwrite it.
+    const { addedBy: _ignored, ...updates } = item;
+    doc.items[idx] = { ...doc.items[idx]!, ...updates };
   } else {
     doc.items.push(item);
   }

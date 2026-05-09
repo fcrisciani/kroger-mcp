@@ -138,7 +138,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "list_usual_items",
-      "List the user's recurring grocery items. Set onlyDue=true to filter to items whose cadence makes them due to reorder.",
+      "List the household's shared recurring grocery items. Set onlyDue=true to filter to items whose cadence makes them due to reorder. Each entry shows which family member added it.",
       { onlyDue: z.boolean().optional() },
       async ({ onlyDue }) => {
         const doc = await getUsualItems(env);
@@ -150,7 +150,8 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           .map((i) => {
             const due = isDue(i) ? "DUE" : "ok";
             const last = i.lastOrdered ?? "never";
-            return `[${due}] ${i.name} — qty ${i.defaultQty}, ${i.cadence}, last ${last}, productId=${i.productId}`;
+            const by = i.addedBy ? ` · added by ${i.addedBy}` : "";
+            return `[${due}] ${i.name} — qty ${i.defaultQty}, ${i.cadence}, last ${last}${by}, productId=${i.productId}`;
           })
           .join("\n");
         return { content: [{ type: "text", text }] };
@@ -159,7 +160,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "add_usual_item",
-      "Add or update an item in the recurring list. Use search_products to find a productId first.",
+      "Add or update an item in the shared household recurring list. The caller's email is recorded as `addedBy`. Use search_products to find a productId first.",
       {
         productId: z.string().min(1),
         name: z.string().min(1),
@@ -175,8 +176,16 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           cadence: args.cadence,
           notes: args.notes,
           timesOrdered: 0,
+          addedBy: this.props.email,
         });
-        return { content: [{ type: "text", text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}).` }] };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Saved usual item: ${item.name} (${item.cadence}, qty ${item.defaultQty}, added by ${item.addedBy}).`,
+            },
+          ],
+        };
       },
     );
 
