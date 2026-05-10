@@ -144,6 +144,17 @@ export async function findLocations(
   return json.data;
 }
 
+export async function getLocation(env: Env, locationId: string): Promise<KrogerLocation | null> {
+  const token = await getClientCredentialsToken(env);
+  const res = await fetch(`${KROGER_BASE}/locations/${encodeURIComponent(locationId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`getLocation failed: ${res.status} ${await res.text()}`);
+  const json = (await res.json()) as { data: KrogerLocation };
+  return json.data;
+}
+
 export interface KrogerProduct {
   productId: string;
   upc: string;

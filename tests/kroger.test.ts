@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getProductsByIds } from "../src/kroger.js";
+import { getLocation, getProductsByIds } from "../src/kroger.js";
 import type { Env } from "../src/types.js";
 import { makeEnv, MemoryKV } from "./helpers.js";
 
@@ -92,5 +92,62 @@ describe("getProductsByIds", () => {
     for (const call of fetchSpy.mock.calls) {
       expect(String(call[0])).toContain("filter.locationId=01400376");
     }
+  });
+});
+
+describe("getLocation", () => {
+  let kv: MemoryKV;
+  let env: Env;
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    kv = new MemoryKV();
+    env = makeEnv({ KROGER_KV: kv as unknown as KVNamespace });
+    await kv.put(
+      "kroger:cc_token",
+      JSON.stringify({ accessToken: "test-token", expiresAt: Date.now() + 60_000 }),
+    );
+    fetchSpy = vi.spyOn(globalThis, "fetch") as unknown as ReturnType<typeof vi.fn>;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the location (including chain) on 200", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: {
+            locationId: "62000123",
+            name: "King Soopers - Downtown",
+            chain: "KINGSOOPERS",
+            address: { addressLine1: "1 Main St", city: "Denver", state: "CO", zipCode: "80202" },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const loc = await getLocation(env, "62000123");
+    expect(loc?.locationId).toBe("62000123");
+    expect(loc?.chain).toBe("KINGSOOPERS");
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain("/locations/62000123");
+  });
+
+  it("returns null on 404 instead of throwing", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response("not found", { status: 404 }));
+    expect(await getLocation(env, "00000000")).toBeNull();
+  });
+
+  it("throws on other non-2xx responses", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response("upstream boom", { status: 502 }));
+    await expect(getLocation(env, "62000123")).rejects.toThrow(/getLocation failed: 502/);
+  });
+
+  it("url-encodes the locationId", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response("not found", { status: 404 }));
+    await getLocation(env, "weird/id with space");
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain(encodeURIComponent("weird/id with space"));
   });
 });

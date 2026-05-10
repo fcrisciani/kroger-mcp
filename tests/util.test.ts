@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cadenceDays, isDue, priceLine } from "../src/util.js";
+import { bannerHost, cadenceDays, cartUrl, isDue, priceLine } from "../src/util.js";
 import type { UsualItem } from "../src/types.js";
 
 const DAY = 86_400_000;
@@ -78,5 +78,31 @@ describe("priceLine", () => {
 
   it("renders a legitimate $0.00 regular price instead of falling back", () => {
     expect(priceLine({ regularPrice: 0, onSale: false })).toBe("$0.00");
+  });
+});
+
+describe("bannerHost / cartUrl", () => {
+  it("maps known banner codes to their domains", () => {
+    expect(bannerHost("KINGSOOPERS")).toBe("www.kingsoopers.com");
+    expect(bannerHost("FREDMEYER")).toBe("www.fredmeyer.com");
+    expect(bannerHost("KROGER")).toBe("www.kroger.com");
+    expect(bannerHost("RALPHS")).toBe("www.ralphs.com");
+  });
+
+  it("is case-insensitive", () => {
+    expect(bannerHost("kingsoopers")).toBe("www.kingsoopers.com");
+    expect(bannerHost("KingSoopers")).toBe("www.kingsoopers.com");
+  });
+
+  it("falls back to kroger.com for unknown or missing chains", () => {
+    expect(bannerHost("SOMENEWBANNER")).toBe("www.kroger.com");
+    expect(bannerHost(undefined)).toBe("www.kroger.com");
+    expect(bannerHost(null)).toBe("www.kroger.com");
+    expect(bannerHost("")).toBe("www.kroger.com");
+  });
+
+  it("cartUrl builds the /cart link for the banner", () => {
+    expect(cartUrl("KINGSOOPERS")).toBe("https://www.kingsoopers.com/cart");
+    expect(cartUrl(undefined)).toBe("https://www.kroger.com/cart");
   });
 });
