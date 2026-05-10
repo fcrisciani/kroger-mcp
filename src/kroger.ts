@@ -102,12 +102,22 @@ async function refreshUserToken(env: Env, refreshToken: string): Promise<KrogerT
   };
 }
 
+// Thrown when no household Kroger refresh token is stored yet. Typed so the
+// MCP layer can map it to a KROGER_NOT_CONNECTED code without string-matching
+// the message.
+export class KrogerNotConnectedError extends Error {
+  constructor(
+    message = "The household Kroger account isn't connected. Visit /kroger/connect on the Worker (a Cloudflare Access login) to authorize it, then retry.",
+  ) {
+    super(message);
+    this.name = "KrogerNotConnectedError";
+  }
+}
+
 export async function getUserAccessToken(env: Env): Promise<string> {
   const tokens = await getKrogerTokens(env);
   if (!tokens) {
-    throw new Error(
-      "Kroger account is not connected. Visit /kroger/connect on the Worker to authorize.",
-    );
+    throw new KrogerNotConnectedError();
   }
   if (tokens.expiresAt > Date.now() + 30_000) {
     return tokens.accessToken;
@@ -174,6 +184,7 @@ export interface KrogerProduct {
   size?: string;         // "1 gal", "12 oz", etc.
   soldBy?: string;       // "WEIGHT" | "UNIT" — disambiguates a `quantity`
   fulfillment?: ProductFulfillment;
+  aisles?: string[];     // human-readable in-store locations, e.g. ["Aisle 5 (left)"] — store-specific, only when a location is set
   regularPrice?: number;
   promoPrice?: number;
   regularPricePerUnit?: number;  // Kroger's per-unit estimate ($/oz, $/ct, …)
@@ -189,6 +200,7 @@ interface RawProduct {
   categories?: string[];
   countryOrigin?: string;
   temperature?: { indicator?: string; heatSensitive?: boolean };
+  aisleLocations?: Array<{ description?: string; number?: string; side?: string; bayNumber?: string; shelfNumber?: string }>;
   items?: Array<{
     itemId?: string;
     size?: string;
@@ -203,6 +215,14 @@ interface RawProduct {
   }>;
 }
 
+function aisleLabel(a: NonNullable<RawProduct["aisleLocations"]>[number]): string | null {
+  const base = a.description?.trim() || (a.number ? `Aisle ${a.number}` : null);
+  if (!base) return null;
+  const sideRaw = a.side?.trim();
+  const side = sideRaw === "L" ? "left" : sideRaw === "R" ? "right" : sideRaw;
+  return side ? `${base} (${side})` : base;
+}
+
 function normalizeProduct(p: RawProduct): KrogerProduct {
   const item = p.items?.[0];
   const regular = item?.price?.regular;
@@ -210,6 +230,9 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
   const onSale = !!(promo && promo > 0 && regular && promo < regular);
   const regPerUnit = item?.price?.regularPerUnitEstimate;
   const promoPerUnit = item?.price?.promoPerUnitEstimate;
+  const aisles = p.aisleLocations
+    ? [...new Set(p.aisleLocations.map(aisleLabel).filter((x): x is string => !!x))]
+    : undefined;
   return {
     productId: p.productId,
     upc: p.upc,
@@ -221,6 +244,7 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
     size: item?.size,
     soldBy: item?.soldBy,
     fulfillment: item?.fulfillment,
+    aisles: aisles && aisles.length > 0 ? aisles : undefined,
     regularPrice: regular,
     promoPrice: promo && promo > 0 ? promo : undefined,
     regularPricePerUnit: regPerUnit && regPerUnit > 0 ? regPerUnit : undefined,

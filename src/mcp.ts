@@ -6,6 +6,7 @@ import {
   findLocations,
   getLocation,
   getProductsByIds,
+  KrogerNotConnectedError,
   searchProducts,
   type KrogerProduct,
   type ProductFulfillment,
@@ -44,14 +45,8 @@ async function guard(fn: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await fn();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/not connected/i.test(msg)) {
-      return fail(
-        "KROGER_NOT_CONNECTED",
-        "The household Kroger account isn't connected. Visit /kroger/connect on the Worker (a Cloudflare Access login) to authorize it, then retry.",
-      );
-    }
-    return fail("INTERNAL_ERROR", msg);
+    if (e instanceof KrogerNotConnectedError) return fail("KROGER_NOT_CONNECTED", e.message);
+    return fail("INTERNAL_ERROR", e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -76,9 +71,10 @@ function fulfillmentSummary(f?: ProductFulfillment): string | undefined {
   return parts.length ? parts.join(" ") : undefined;
 }
 
-// Compact multi-line block per product so the model has enough to compare:
-// name + price (+ per-unit estimate), then the attributes Kroger gives us
-// (size, brand, category, temperature, sold-by, origin, fulfillment), then ids.
+// Compact multi-line block per product so the model has enough to compare and
+// to answer "where is this in the store": name + price (+ per-unit estimate),
+// then the attributes Kroger gives us (size, brand, category, temperature,
+// sold-by, origin, fulfillment, in-store aisle), then ids.
 function formatProduct(p: KrogerProduct, n: number): string {
   // Mirror priceLine: when on sale, the per-unit estimate should be the promo one.
   const pricePerUnit =
@@ -91,6 +87,7 @@ function formatProduct(p: KrogerProduct, n: number): string {
     p.temperature && p.temperature.toLowerCase() !== "ambient" ? p.temperature.toLowerCase() : undefined,
     p.soldBy ? `sold by ${p.soldBy.toLowerCase()}` : undefined,
     p.countryOrigin ? `from ${p.countryOrigin}` : undefined,
+    p.aisles?.length ? `aisle: ${p.aisles.join(" / ")}` : undefined,
     fulfillmentSummary(p.fulfillment),
   ].filter(Boolean);
   const lines = [`${n}. ${p.description} — ${priceLine(p)}${perUnit}`];
@@ -177,7 +174,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "search_products",
-      "Search Kroger's product catalog. Each result lists productId + upc (pass a chosen `upc` to add_to_cart for a deterministic add), brand, category, size, sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of origin, and per-fulfillment availability (pickup/delivery). If a default location is set, prices/sale flags and a per-unit price estimate are for that store. Fresh-produce results are nudged up when the query has no brand/processing words.",
+      "Search Kroger's product catalog. Each result lists productId + upc (pass a chosen `upc` to add_to_cart for a deterministic add), brand, category, size, sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of origin, and per-fulfillment availability (pickup/delivery). When a default location is set, results also include prices/sale flags, a per-unit price estimate, and the in-store aisle (handy for 'where is X in the store'). Fresh-produce results are nudged up when the query has no brand/processing words.",
       {
         term: z.string().min(1),
         limit: z.number().int().min(1).max(25).optional(),

@@ -111,12 +111,14 @@ state; the OAuth provider never touches Kroger tokens.
   us about the item: `productId`, `upc`, brand, category, size,
   sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of
   origin, and per-fulfillment availability (pickup/delivery/ship). When a
-  default location is set, prices/sale flags and a per-unit price estimate are
-  store-specific. Results are reordered to favor fresh produce when the query
+  default location is set, prices/sale flags, a per-unit price estimate, and the
+  in-store aisle(s) are store-specific — the aisle is what answers "where is X
+  in the store". Results are reordered to favor fresh produce when the query
   has no brand/processing signal (see below). The display lives in
   `formatProduct()` in `src/mcp.ts`; the extraction from Kroger's raw response
   is `normalizeProduct()` in `src/kroger.ts` (everything's optional — missing
-  fields just don't render).
+  fields just don't render; aisle data only comes back when `filter.locationId`
+  is sent, i.e. a default store is set).
 
 ### Structured errors
 

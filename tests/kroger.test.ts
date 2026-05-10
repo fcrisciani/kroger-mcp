@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLocation, getProductsByIds } from "../src/kroger.js";
+import { getLocation, getProductsByIds, getUserAccessToken, KrogerNotConnectedError } from "../src/kroger.js";
 import type { Env } from "../src/types.js";
 import { makeEnv, MemoryKV } from "./helpers.js";
+
+describe("getUserAccessToken", () => {
+  it("throws a typed KrogerNotConnectedError when no household token is stored", async () => {
+    const env = makeEnv();
+    await expect(getUserAccessToken(env)).rejects.toBeInstanceOf(KrogerNotConnectedError);
+  });
+});
 
 function fakeProductsResponse(productIds: string[]): Response {
   return new Response(
@@ -55,6 +62,11 @@ describe("getProductsByIds", () => {
               categories: ["Produce", "Fresh Herbs"],
               countryOrigin: "United States",
               temperature: { indicator: "Refrigerated", heatSensitive: false },
+              aisleLocations: [
+                { description: "AISLE 12", number: "12", side: "L" },
+                { description: "AISLE 12", number: "12", side: " L " }, // whitespace + dup — should still collapse to "AISLE 12 (left)"
+                { number: "3", side: "R" }, // no description — falls back to "Aisle 3"
+              ],
               items: [
                 {
                   size: "0.5 oz",
@@ -81,6 +93,7 @@ describe("getProductsByIds", () => {
     expect(p?.promoPrice).toBe(1.49);
     expect(p?.regularPricePerUnit).toBe(3.98);
     expect(p?.promoPricePerUnit).toBe(2.98);
+    expect(p?.aisles).toEqual(["AISLE 12 (left)", "Aisle 3 (right)"]);
     expect(p?.onSale).toBe(true);
   });
 
