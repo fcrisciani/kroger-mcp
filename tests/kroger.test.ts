@@ -55,6 +55,11 @@ describe("getProductsByIds", () => {
               categories: ["Produce", "Fresh Herbs"],
               countryOrigin: "United States",
               temperature: { indicator: "Refrigerated", heatSensitive: false },
+              aisleLocations: [
+                { description: "AISLE 12", number: "12", side: "L" },
+                { description: "AISLE 12", number: "12", side: "L" }, // dup — should collapse
+                { number: "3", side: "R" }, // no description — falls back to "Aisle 3"
+              ],
               items: [
                 {
                   size: "0.5 oz",
@@ -81,6 +86,7 @@ describe("getProductsByIds", () => {
     expect(p?.promoPrice).toBe(1.49);
     expect(p?.regularPricePerUnit).toBe(3.98);
     expect(p?.promoPricePerUnit).toBe(2.98);
+    expect(p?.aisles).toEqual(["AISLE 12 (left)", "Aisle 3 (right)"]);
     expect(p?.onSale).toBe(true);
   });
 
