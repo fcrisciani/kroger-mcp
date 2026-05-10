@@ -5,11 +5,16 @@ import type {
   UsualItem,
   UsualItemsDoc,
 } from "./types.js";
+import { cartUrl } from "./util.js";
 
 const K = {
   krogerTokens: "kroger:tokens",
   ccToken: "kroger:cc_token",
   defaultLocation: "prefs:default_location_id",
+  // Banner/chain of the default store (e.g. "KINGSOOPERS"). Optional sibling
+  // of defaultLocation; documents from before this was added simply won't have
+  // it, in which case the checkout URL falls back to kroger.com.
+  defaultLocationChain: "prefs:default_location_chain",
   usualItems: "prefs:usual_items",
 } as const;
 
@@ -46,6 +51,25 @@ export async function getDefaultLocationId(env: Env): Promise<string | null> {
 
 export async function setDefaultLocationId(env: Env, locationId: string): Promise<void> {
   await env.KROGER_KV.put(K.defaultLocation, locationId);
+}
+
+export async function getDefaultLocationChain(env: Env): Promise<string | null> {
+  return env.KROGER_KV.get(K.defaultLocationChain);
+}
+
+export async function setDefaultLocationChain(env: Env, chain: string): Promise<void> {
+  await env.KROGER_KV.put(K.defaultLocationChain, chain);
+}
+
+export async function clearDefaultLocationChain(env: Env): Promise<void> {
+  await env.KROGER_KV.delete(K.defaultLocationChain);
+}
+
+// The kroger.com / kingsoopers.com / fredmeyer.com / … cart URL for the
+// current default store's banner. Falls back to kroger.com when no chain has
+// been recorded.
+export async function getCheckoutUrl(env: Env): Promise<string> {
+  return cartUrl(await getDefaultLocationChain(env));
 }
 
 export async function getUsualItems(env: Env): Promise<UsualItemsDoc> {

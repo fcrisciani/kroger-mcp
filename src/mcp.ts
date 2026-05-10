@@ -4,22 +4,25 @@ import { z } from "zod";
 import {
   addItemsToCart,
   findLocations,
+  getLocation,
   getProductsByIds,
   searchProducts,
 } from "./kroger.js";
 import {
+  clearDefaultLocationChain,
+  getCheckoutUrl,
+  getDefaultLocationChain,
   getDefaultLocationId,
   getUsualItems,
   patchUsualItem,
   removeUsualItem,
+  setDefaultLocationChain,
   setDefaultLocationId,
   upsertUsualItem,
 } from "./storage.js";
 import type { Env, SessionProps } from "./types.js";
 import { runWeeklyOrder } from "./weekly-order.js";
 import { isDue, priceLine } from "./util.js";
-
-const CHECKOUT_URL = "https://www.kroger.com/cart";
 
 export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
   server = new McpServer({ name: "kroger-mcp", version: "0.1.0" });
@@ -31,7 +34,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "find_locations",
-      "Find Kroger-family stores near a ZIP code. Use this to pick a default store.",
+      "Find Kroger-family stores near a ZIP code. Use this to pick a default store. Output includes the banner (KROGER, KINGSOOPERS, FREDMEYER, …) since each banner has its own website.",
       {
         zipCode: z.string().regex(/^\d{5}$/),
         radiusInMiles: z.number().int().min(1).max(100).optional(),
@@ -39,32 +42,52 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
       },
       async ({ zipCode, radiusInMiles, limit }) => {
         const locs = await findLocations(env, { zipCode, radiusInMiles, limit });
-        const lines = locs.map(
-          (l) =>
-            `${l.locationId}  ${l.name} — ${l.address.addressLine1}, ${l.address.city}, ${l.address.state} ${l.address.zipCode}`,
-        );
+        const lines = locs.map((l) => {
+          const banner = l.chain ? `[${l.chain}] ` : "";
+          return `${l.locationId}  ${banner}${l.name} — ${l.address.addressLine1}, ${l.address.city}, ${l.address.state} ${l.address.zipCode}`;
+        });
         return { content: [{ type: "text", text: lines.join("\n") || "No stores found." }] };
       },
     );
 
     this.server.tool(
       "set_default_location",
-      "Save a Kroger locationId as the default store for searches and the cart.",
+      "Save a Kroger locationId as the default store for searches and the cart. Also records the store's banner so checkout links point at the right site (kingsoopers.com, fredmeyer.com, …).",
       { locationId: z.string().min(1) },
       async ({ locationId }) => {
         await setDefaultLocationId(env, locationId);
-        return { content: [{ type: "text", text: `Default location set to ${locationId}.` }] };
+        // Best-effort: look up the banner so checkout URLs are correct. If the
+        // lookup fails, drop any stale chain rather than pointing at the wrong
+        // banner's site — the checkout URL then falls back to kroger.com.
+        let bannerNote = " The store's banner couldn't be determined; checkout links will use kroger.com.";
+        try {
+          const loc = await getLocation(env, locationId);
+          if (loc?.chain) {
+            await setDefaultLocationChain(env, loc.chain);
+            bannerNote = ` Banner: ${loc.chain}.`;
+          } else {
+            await clearDefaultLocationChain(env);
+          }
+        } catch {
+          await clearDefaultLocationChain(env);
+        }
+        return { content: [{ type: "text", text: `Default location set to ${locationId}.${bannerNote}` }] };
       },
     );
 
     this.server.tool(
       "get_default_location",
-      "Return the currently saved default locationId, if any.",
+      "Return the currently saved default locationId and its banner, if any.",
       {},
       async () => {
         const loc = await getDefaultLocationId(env);
+        if (!loc) {
+          return { content: [{ type: "text", text: "No default location set. Use find_locations + set_default_location." }] };
+        }
+        const chain = await getDefaultLocationChain(env);
+        const checkout = await getCheckoutUrl(env);
         return {
-          content: [{ type: "text", text: loc ?? "No default location set. Use find_locations + set_default_location." }],
+          content: [{ type: "text", text: `Default location: ${loc}${chain ? ` (banner: ${chain})` : ""}. Checkout URL: ${checkout}` }],
         };
       },
     );
@@ -123,11 +146,12 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         }
         const top = products[0]!;
         await addItemsToCart(env, [{ upc: top.upc, quantity: quantity ?? 1 }]);
+        const checkoutUrl = await getCheckoutUrl(env);
         return {
           content: [
             {
               type: "text",
-              text: `Added ${quantity ?? 1} × ${top.description} (${priceLine(top)}) to your Kroger cart. Review and checkout: ${CHECKOUT_URL}`,
+              text: `Added ${quantity ?? 1} × ${top.description} (${priceLine(top)}) to your Kroger cart. Review and checkout: ${checkoutUrl}`,
             },
           ],
         };

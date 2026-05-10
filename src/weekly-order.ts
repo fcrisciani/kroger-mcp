@@ -4,14 +4,13 @@ import {
   type CartItemInput,
 } from "./kroger.js";
 import {
+  getCheckoutUrl,
   getDefaultLocationId,
   getUsualItems,
   recordOrderedItems,
 } from "./storage.js";
 import type { Env } from "./types.js";
 import { isDue, priceLine } from "./util.js";
-
-const CHECKOUT_URL = "https://www.kroger.com/cart";
 
 export interface WeeklyOrderArgs {
   includeAll?: boolean;
@@ -96,7 +95,7 @@ export async function runWeeklyOrder(env: Env, args: WeeklyOrderArgs): Promise<s
   if (sales.length > 0) {
     sections.push("", "On sale this week:", ...sales);
   }
-  sections.push("", `Review & checkout: ${CHECKOUT_URL}`);
+  sections.push("", `Review & checkout: ${await getCheckoutUrl(env)}`);
   if (bookkeepingNote) sections.push(bookkeepingNote);
 
   return sections.join("\n");

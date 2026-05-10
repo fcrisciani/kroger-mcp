@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getUsualItems, patchUsualItem, upsertUsualItem } from "../src/storage.js";
+import {
+  clearDefaultLocationChain,
+  getCheckoutUrl,
+  getUsualItems,
+  patchUsualItem,
+  setDefaultLocationChain,
+  upsertUsualItem,
+} from "../src/storage.js";
 import type { Env } from "../src/types.js";
 import { makeEnv, MemoryKV } from "./helpers.js";
 
@@ -128,5 +135,25 @@ describe("patchUsualItem", () => {
     expect(updated!.timesOrdered).toBe(7);
     expect(updated!.lastOrdered).toBe("2026-04-15T12:00:00Z");
     expect(updated!.addedBy).toBe("alice@example.com");
+  });
+});
+
+describe("getCheckoutUrl", () => {
+  it("returns kroger.com when no banner has been recorded", async () => {
+    const env = makeEnv();
+    expect(await getCheckoutUrl(env)).toBe("https://www.kroger.com/cart");
+  });
+
+  it("returns the banner's cart URL once a chain is recorded", async () => {
+    const env = makeEnv();
+    await setDefaultLocationChain(env, "KINGSOOPERS");
+    expect(await getCheckoutUrl(env)).toBe("https://www.kingsoopers.com/cart");
+  });
+
+  it("falls back to kroger.com after the chain is cleared", async () => {
+    const env = makeEnv();
+    await setDefaultLocationChain(env, "FREDMEYER");
+    await clearDefaultLocationChain(env);
+    expect(await getCheckoutUrl(env)).toBe("https://www.kroger.com/cart");
   });
 });

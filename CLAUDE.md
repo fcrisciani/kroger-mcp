@@ -85,8 +85,11 @@ state; the OAuth provider never touches Kroger tokens.
 - `add_one_off` — fuzzy product search + add top match to shared Kroger cart.
 - `add_usual_item` — upsert into the household recurring list. Stamps `addedBy`.
 - `check_sales_on_usuals` — read-only: which household items are on sale?
-- `find_locations` — store search by ZIP.
-- `get_default_location` / `set_default_location` — pin a `locationId` for the household.
+- `find_locations` — store search by ZIP. Output includes the banner (`KROGER`,
+  `KINGSOOPERS`, …) since each banner has its own website.
+- `get_default_location` / `set_default_location` — pin a `locationId` for the
+  household. `set_default_location` also records the store's banner so checkout
+  links point at the right site (kingsoopers.com, fredmeyer.com, …).
 - `list_usual_items` — show recurring items (with `addedBy`); filter by what's due.
 - `prepare_weekly_order` — *the* tool. Pulls due-cadence usuals, resolves
   each to a current-price product at the default store, calls `cart/add`,
@@ -94,12 +97,26 @@ state; the OAuth provider never touches Kroger tokens.
 - `remove_usual_item`, `update_usual_item` — list maintenance.
 - `search_products` — catalog search (price-aware when default location is set).
 
+### Banner-aware checkout URLs
+
+Kroger runs ~25 banner stores (King Soopers, Fred Meyer, Ralphs, QFC, …), each
+with its own e-commerce site. Items added against a banner's `locationId` land
+in *that banner's* cart, not `kroger.com`. So the checkout link the tools return
+follows the default store's banner. The banner→domain map lives in
+`bannerHost()` in `src/util.ts`; unknown or missing banners fall back to
+`kroger.com`. `set_default_location` looks the banner up via the Locations API
+and stores it in `prefs:default_location_chain`; if the lookup fails it clears
+the key rather than risk pointing at the wrong site.
+
 ## KV layout
 
 `KROGER_KV`:
 - `kroger:tokens` → `{ accessToken, refreshToken, expiresAt, scope }` (one per household)
 - `kroger:cc_token` → `{ accessToken, expiresAt }` (TTL'd; client-credentials cache)
 - `prefs:default_location_id` → `string`
+- `prefs:default_location_chain` → `string` (banner code, e.g. `KINGSOOPERS`).
+  Optional sibling of `default_location_id`; missing on docs from before this
+  was added, in which case the checkout URL falls back to kroger.com.
 - `prefs:usual_items` → `{ items: UsualItem[], updatedAt }`. Each `UsualItem`
   has an optional `addedBy` (email of whoever created it). Documents written
   before the multi-member migration won't have it; readers must tolerate that.

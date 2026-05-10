@@ -40,3 +40,42 @@ export function priceLine(p: PriceableProduct): string {
   if (typeof p.regularPrice === "number") return `$${p.regularPrice.toFixed(2)}`;
   return "price unavailable at this location";
 }
+
+// Kroger runs many banner stores, each with its own e-commerce site. Items
+// added against a banner's locationId land in that banner's cart, not
+// kroger.com — so the checkout link has to follow the store. This maps the
+// `chain` value from the Locations API to the banner's domain. Anything not
+// listed (or a missing chain) falls back to kroger.com.
+const BANNER_HOSTS: Record<string, string> = {
+  KROGER: "www.kroger.com",
+  KINGSOOPERS: "www.kingsoopers.com",
+  FREDMEYER: "www.fredmeyer.com",
+  RALPHS: "www.ralphs.com",
+  FRYS: "www.frysfood.com",
+  QFC: "www.qfc.com",
+  SMITHS: "www.smithsfoodanddrug.com",
+  DILLONS: "www.dillons.com",
+  BAKERS: "www.bakersplus.com",
+  CITYMARKET: "www.citymarket.com",
+  GERBES: "www.gerbes.com",
+  PAYLESS: "www.pay-less.com",
+  OWENS: "www.owensmarket.com",
+  JAYC: "www.jaycfoods.com",
+  HARRISTEETER: "www.harristeeter.com",
+  MARIANOS: "www.marianos.com",
+  METROMARKET: "www.metromarket.net",
+  PICKNSAVE: "www.picknsave.com",
+  COPPS: "www.copps.com",
+  FOODSCO: "www.foodsco.net",
+  FOOD4LESS: "www.food4less.com",
+};
+
+export function bannerHost(chain?: string | null): string {
+  if (!chain) return "www.kroger.com";
+  return BANNER_HOSTS[chain.toUpperCase()] ?? "www.kroger.com";
+}
+
+export function cartUrl(chain?: string | null): string {
+  return `https://${bannerHost(chain)}/cart`;
+}
+
