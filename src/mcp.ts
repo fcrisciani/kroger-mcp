@@ -6,6 +6,7 @@ import {
   findLocations,
   getLocation,
   getProductsByIds,
+  KrogerNotConnectedError,
   searchProducts,
   type KrogerProduct,
   type ProductFulfillment,
@@ -44,14 +45,8 @@ async function guard(fn: () => Promise<ToolResult>): Promise<ToolResult> {
   try {
     return await fn();
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/not connected/i.test(msg)) {
-      return fail(
-        "KROGER_NOT_CONNECTED",
-        "The household Kroger account isn't connected. Visit /kroger/connect on the Worker (a Cloudflare Access login) to authorize it, then retry.",
-      );
-    }
-    return fail("INTERNAL_ERROR", msg);
+    if (e instanceof KrogerNotConnectedError) return fail("KROGER_NOT_CONNECTED", e.message);
+    return fail("INTERNAL_ERROR", e instanceof Error ? e.message : String(e));
   }
 }
 

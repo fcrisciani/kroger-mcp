@@ -102,12 +102,22 @@ async function refreshUserToken(env: Env, refreshToken: string): Promise<KrogerT
   };
 }
 
+// Thrown when no household Kroger refresh token is stored yet. Typed so the
+// MCP layer can map it to a KROGER_NOT_CONNECTED code without string-matching
+// the message.
+export class KrogerNotConnectedError extends Error {
+  constructor(
+    message = "The household Kroger account isn't connected. Visit /kroger/connect on the Worker (a Cloudflare Access login) to authorize it, then retry.",
+  ) {
+    super(message);
+    this.name = "KrogerNotConnectedError";
+  }
+}
+
 export async function getUserAccessToken(env: Env): Promise<string> {
   const tokens = await getKrogerTokens(env);
   if (!tokens) {
-    throw new Error(
-      "Kroger account is not connected. Visit /kroger/connect on the Worker to authorize.",
-    );
+    throw new KrogerNotConnectedError();
   }
   if (tokens.expiresAt > Date.now() + 30_000) {
     return tokens.accessToken;

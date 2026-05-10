@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getLocation, getProductsByIds } from "../src/kroger.js";
+import { getLocation, getProductsByIds, getUserAccessToken, KrogerNotConnectedError } from "../src/kroger.js";
 import type { Env } from "../src/types.js";
 import { makeEnv, MemoryKV } from "./helpers.js";
+
+describe("getUserAccessToken", () => {
+  it("throws a typed KrogerNotConnectedError when no household token is stored", async () => {
+    const env = makeEnv();
+    await expect(getUserAccessToken(env)).rejects.toBeInstanceOf(KrogerNotConnectedError);
+  });
+});
 
 function fakeProductsResponse(productIds: string[]): Response {
   return new Response(
