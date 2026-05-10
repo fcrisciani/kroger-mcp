@@ -64,7 +64,7 @@ describe("getProductsByIds", () => {
               temperature: { indicator: "Refrigerated", heatSensitive: false },
               aisleLocations: [
                 { description: "AISLE 12", number: "12", side: "L" },
-                { description: "AISLE 12", number: "12", side: "L" }, // dup — should collapse
+                { description: "AISLE 12", number: "12", side: " L " }, // whitespace + dup — should still collapse to "AISLE 12 (left)"
                 { number: "3", side: "R" }, // no description — falls back to "Aisle 3"
               ],
               items: [

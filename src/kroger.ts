@@ -218,7 +218,8 @@ interface RawProduct {
 function aisleLabel(a: NonNullable<RawProduct["aisleLocations"]>[number]): string | null {
   const base = a.description?.trim() || (a.number ? `Aisle ${a.number}` : null);
   if (!base) return null;
-  const side = a.side === "L" ? "left" : a.side === "R" ? "right" : a.side?.trim();
+  const sideRaw = a.side?.trim();
+  const side = sideRaw === "L" ? "left" : sideRaw === "R" ? "right" : sideRaw;
   return side ? `${base} (${side})` : base;
 }
 
