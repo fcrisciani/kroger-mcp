@@ -79,3 +79,47 @@ export function cartUrl(chain?: string | null): string {
   return `https://${bannerHost(chain)}/cart`;
 }
 
+// Words that signal the query is *not* asking for plain fresh produce — if any
+// of these appear, we leave Kroger's ordering alone.
+const PROCESSED_HINTS = /\b(frozen|canned|dried|dehydrated|instant|jarred|bottled|powder|powdered|mix|snack|chips?|bar|bars|juice|sauce|paste|puree|cup|cups|meal|meals|pie|cake|cookie|cereal|flavou?red)\b/i;
+const FRESH_CATEGORY = /\bproduce\b|fresh\s+(fruit|veget)/i;
+const PROCESSED_CATEGORY = /\bfrozen\b|\bsnack|\bcandy\b|\bcereal\b|\bbakery\b|\bdeli\b|canned|jarred/i;
+
+interface RankableProduct {
+  brand?: string;
+  categories?: string[];
+}
+
+// Kroger's `filter.term` relevance is rough — "banana" can surface peach cups,
+// "zucchini" a frozen Smart Ones meal. When the query has no brand or
+// processing signal (i.e. it reads like "I want the fresh thing"), nudge
+// fresh-produce candidates to the front and demote obviously off-category
+// (frozen/snack/etc.) ones. This is a stable sort, so within each bucket
+// Kroger's original order is preserved. It only reorders — it never drops
+// anything.
+export function reorderForRelevance<T extends RankableProduct>(query: string, products: T[]): T[] {
+  if (products.length < 2) return products;
+  // If the query mentions a brand we recognize in the results, or a processing
+  // word, the user isn't asking for "the fresh one" — don't second-guess.
+  const q = query.toLowerCase();
+  if (PROCESSED_HINTS.test(q)) return products;
+  const mentionsAKnownBrand = products.some(
+    (p) => p.brand && q.includes(p.brand.toLowerCase()),
+  );
+  if (mentionsAKnownBrand) return products;
+  // Only bother if there's actually a fresh-vs-processed split to act on.
+  const cats = (p: T) => (p.categories ?? []).join(" ");
+  const hasFresh = products.some((p) => FRESH_CATEGORY.test(cats(p)));
+  if (!hasFresh) return products;
+  const rank = (p: T): number => {
+    const c = cats(p);
+    if (FRESH_CATEGORY.test(c)) return 0;
+    if (PROCESSED_CATEGORY.test(c)) return 2;
+    return 1;
+  };
+  return products
+    .map((p, i) => ({ p, i, r: rank(p) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.p);
+}
+

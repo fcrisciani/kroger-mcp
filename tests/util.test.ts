@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bannerHost, cadenceDays, cartUrl, isDue, priceLine } from "../src/util.js";
+import { bannerHost, cadenceDays, cartUrl, isDue, priceLine, reorderForRelevance } from "../src/util.js";
 import type { UsualItem } from "../src/types.js";
 
 const DAY = 86_400_000;
@@ -104,5 +104,49 @@ describe("bannerHost / cartUrl", () => {
   it("cartUrl builds the /cart link for the banner", () => {
     expect(cartUrl("KINGSOOPERS")).toBe("https://www.kingsoopers.com/cart");
     expect(cartUrl(undefined)).toBe("https://www.kroger.com/cart");
+  });
+});
+
+describe("reorderForRelevance", () => {
+  const fresh = (n: string) => ({ description: n, categories: ["Produce", "Fresh Vegetables"] });
+  const frozen = (n: string) => ({ description: n, categories: ["Frozen", "Frozen Meals"] });
+  const snack = (n: string) => ({ description: n, categories: ["Snacks", "Cookies & Crackers"] });
+  const branded = (n: string, brand: string) => ({ description: n, brand, categories: ["Pantry"] });
+
+  it("pushes fresh produce ahead of a frozen meal for a bare produce query", () => {
+    const out = reorderForRelevance("zucchini", [frozen("Smart Ones Zucchini Bake"), fresh("Zucchini Squash")]);
+    expect(out[0]?.description).toBe("Zucchini Squash");
+    expect(out[1]?.description).toBe("Smart Ones Zucchini Bake");
+  });
+
+  it("pushes fresh produce ahead of a snack cup for 'banana'", () => {
+    const out = reorderForRelevance("banana", [snack("Peach Fruit Cups"), fresh("Bananas")]);
+    expect(out[0]?.description).toBe("Bananas");
+  });
+
+  it("is a stable sort within a bucket — Kroger's order is preserved", () => {
+    const out = reorderForRelevance("apple", [fresh("Gala Apples"), fresh("Honeycrisp Apples"), frozen("Apple Pie")]);
+    expect(out.map((p) => p.description)).toEqual(["Gala Apples", "Honeycrisp Apples", "Apple Pie"]);
+  });
+
+  it("leaves the order alone when the query has a processing word", () => {
+    const input = [frozen("Frozen Mango Chunks"), fresh("Fresh Mango")];
+    expect(reorderForRelevance("frozen mango", input)).toBe(input);
+  });
+
+  it("leaves the order alone when the query names a brand present in the results", () => {
+    const input = [branded("Smart Ones Mac & Cheese", "Smart Ones"), fresh("Macaroni")];
+    expect(reorderForRelevance("smart ones mac and cheese", input)).toBe(input);
+  });
+
+  it("leaves the order alone when there's no fresh-vs-processed split to act on", () => {
+    const input = [branded("Barilla Penne", "Barilla"), branded("Ronzoni Penne", "Ronzoni")];
+    expect(reorderForRelevance("penne", input)).toBe(input);
+  });
+
+  it("no-ops on lists of 0 or 1", () => {
+    expect(reorderForRelevance("x", [])).toEqual([]);
+    const one = [fresh("Bananas")];
+    expect(reorderForRelevance("banana", one)).toBe(one);
   });
 });

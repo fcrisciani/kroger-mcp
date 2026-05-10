@@ -5,6 +5,7 @@ import {
   setCachedClientCredentialsToken,
   setKrogerTokens,
 } from "./storage.js";
+import { reorderForRelevance } from "./util.js";
 
 const KROGER_BASE = "https://api.kroger.com/v1";
 
@@ -214,7 +215,7 @@ export async function searchProducts(
   });
   if (!res.ok) throw new Error(`searchProducts failed: ${res.status} ${await res.text()}`);
   const json = (await res.json()) as { data: RawProduct[] };
-  return json.data.map(normalizeProduct);
+  return reorderForRelevance(args.term, json.data.map(normalizeProduct));
 }
 
 // Kroger's `filter.productId` accepts a comma-separated list, but
