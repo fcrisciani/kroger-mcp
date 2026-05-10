@@ -14,9 +14,9 @@
   // CF_ACCESS_AUD: the AUD tag of the Access Application that fronts this
   //   Worker. Found in Zero Trust → Access → Applications → your app.
   "vars": {
-    "BASE_URL": "kroger-mcp.f-crisciani.workers.dev",
-    "CF_ACCESS_TEAM_DOMAIN": "<your-team>",
-    "CF_ACCESS_AUD": "<your-application-aud>"
+    "BASE_URL": "https://kroger-mcp.f-crisciani.workers.dev",
+    "CF_ACCESS_TEAM_DOMAIN": "fcrisciani",
+    "CF_ACCESS_AUD": "7fa8ad2c1c724535c19cf5c4f26cd239a3adf2e354abfbf16eb9ce58c0229a9c"
   },
 
   // Two KV namespaces:
