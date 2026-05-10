@@ -144,6 +144,13 @@ describe("reorderForRelevance", () => {
     expect(reorderForRelevance("penne", input)).toBe(input);
   });
 
+  it("demotes a Frozen-temperature candidate even if its category doesn't say 'frozen'", () => {
+    const frozenByTemp = { description: "Mango Chunks", categories: ["Fruit"], temperature: "Frozen" };
+    const out = reorderForRelevance("mango", [frozenByTemp, fresh("Fresh Mango")]);
+    expect(out[0]?.description).toBe("Fresh Mango");
+    expect(out[1]?.description).toBe("Mango Chunks");
+  });
+
   it("no-ops on lists of 0 or 1", () => {
     expect(reorderForRelevance("x", [])).toEqual([]);
     const one = [fresh("Bananas")];

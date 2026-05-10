@@ -7,6 +7,8 @@ import {
   getLocation,
   getProductsByIds,
   searchProducts,
+  type KrogerProduct,
+  type ProductFulfillment,
 } from "./kroger.js";
 import {
   bulkUpsertUsualItems,
@@ -63,6 +65,35 @@ async function requireDefaultLocation(env: Env): Promise<string | ToolResult> {
 }
 function isToolResult(x: unknown): x is ToolResult {
   return typeof x === "object" && x !== null && "content" in x;
+}
+
+function fulfillmentSummary(f?: ProductFulfillment): string | undefined {
+  if (!f) return undefined;
+  const parts: string[] = [];
+  if (f.curbside !== undefined) parts.push(`pickup${f.curbside ? "✓" : "✗"}`);
+  if (f.delivery !== undefined) parts.push(`delivery${f.delivery ? "✓" : "✗"}`);
+  if (f.shipToHome) parts.push("ship✓");
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+// Compact multi-line block per product so the model has enough to compare:
+// name + price (+ per-unit estimate), then the attributes Kroger gives us
+// (size, brand, category, temperature, sold-by, origin, fulfillment), then ids.
+function formatProduct(p: KrogerProduct, n: number): string {
+  const perUnit = typeof p.regularPricePerUnit === "number" ? ` (~$${p.regularPricePerUnit.toFixed(2)}/unit)` : "";
+  const attrs = [
+    p.size,
+    p.brand,
+    p.categories?.length ? p.categories.join("/") : undefined,
+    p.temperature && p.temperature.toLowerCase() !== "ambient" ? p.temperature.toLowerCase() : undefined,
+    p.soldBy ? `sold by ${p.soldBy.toLowerCase()}` : undefined,
+    p.countryOrigin ? `from ${p.countryOrigin}` : undefined,
+    fulfillmentSummary(p.fulfillment),
+  ].filter(Boolean);
+  const lines = [`${n}. ${p.description} — ${priceLine(p)}${perUnit}`];
+  if (attrs.length) lines.push(`   ${attrs.join(" · ")}`);
+  lines.push(`   id=${p.productId} upc=${p.upc}`);
+  return lines.join("\n");
 }
 
 const CADENCE = z.enum(["weekly", "biweekly", "monthly"]);
@@ -143,7 +174,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "search_products",
-      "Search Kroger's product catalog. Returns each candidate's productId, upc, brand and category — pass a chosen `upc` to add_to_cart for a deterministic add. If a default location is set, prices and sale flags are for that store. Fresh-produce results are nudged up when the query has no brand/processing words.",
+      "Search Kroger's product catalog. Each result lists productId + upc (pass a chosen `upc` to add_to_cart for a deterministic add), brand, category, size, sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of origin, and per-fulfillment availability (pickup/delivery). If a default location is set, prices/sale flags and a per-unit price estimate are for that store. Fresh-produce results are nudged up when the query has no brand/processing words.",
       {
         term: z.string().min(1),
         limit: z.number().int().min(1).max(25).optional(),
@@ -155,14 +186,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           const loc = locationId ?? (await getDefaultLocationId(env)) ?? undefined;
           const products = await searchProducts(env, { term, limit, brand, locationId: loc });
           if (products.length === 0) return ok(`No products matched "${term}".`);
-          const text = products
-            .map((p, i) => {
-              const meta = [p.size, p.brand].filter(Boolean).join(", ");
-              const cat = p.categories?.length ? `\n   category: ${p.categories.join(" / ")}` : "";
-              return `${i + 1}. ${p.description}${meta ? ` (${meta})` : ""} — ${priceLine(p)}\n   id=${p.productId} upc=${p.upc}${cat}`;
-            })
-            .join("\n");
-          return ok(text);
+          return ok(products.map((p, i) => formatProduct(p, i + 1)).join("\n"));
         }),
     );
 
@@ -216,9 +240,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
             const loc = (await getDefaultLocationId(env)) ?? undefined;
             const products = await searchProducts(env, { term: query, limit: 5, locationId: loc });
             if (products.length === 0) return ok(`No products matched "${query}".`);
-            const t = products
-              .map((p, i) => `${i + 1}. ${p.description}${p.brand ? ` (${p.brand})` : ""} — ${priceLine(p)} [upc ${p.upc}]${p.categories?.[0] ? ` · ${p.categories[0]}` : ""}`)
-              .join("\n");
+            const t = products.map((p, i) => formatProduct(p, i + 1)).join("\n");
             return ok(`Top matches for "${query}" — call add_to_cart with the chosen upc:\n${t}`);
           }
           const locOrErr = await requireDefaultLocation(env);

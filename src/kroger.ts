@@ -156,15 +156,28 @@ export async function getLocation(env: Env, locationId: string): Promise<KrogerL
   return json.data;
 }
 
+export interface ProductFulfillment {
+  inStore?: boolean;     // available to shop in-store
+  curbside?: boolean;    // available for curbside pickup
+  delivery?: boolean;    // available for home delivery
+  shipToHome?: boolean;  // available to ship
+}
+
 export interface KrogerProduct {
   productId: string;
   upc: string;
   description: string;
   brand?: string;
   categories?: string[];
-  size?: string;          // "1 gal", "12 oz", etc.
+  countryOrigin?: string;
+  temperature?: string;  // "Ambient" | "Refrigerated" | "Frozen"
+  size?: string;         // "1 gal", "12 oz", etc.
+  soldBy?: string;       // "WEIGHT" | "UNIT" — disambiguates a `quantity`
+  fulfillment?: ProductFulfillment;
   regularPrice?: number;
   promoPrice?: number;
+  regularPricePerUnit?: number;  // Kroger's per-unit estimate ($/oz, $/ct, …)
+  promoPricePerUnit?: number;
   onSale: boolean;
 }
 
@@ -174,10 +187,19 @@ interface RawProduct {
   description: string;
   brand?: string;
   categories?: string[];
+  countryOrigin?: string;
+  temperature?: { indicator?: string; heatSensitive?: boolean };
   items?: Array<{
     itemId?: string;
     size?: string;
-    price?: { regular?: number; promo?: number };
+    soldBy?: string;
+    fulfillment?: ProductFulfillment;
+    price?: {
+      regular?: number;
+      promo?: number;
+      regularPerUnitEstimate?: number;
+      promoPerUnitEstimate?: number;
+    };
   }>;
 }
 
@@ -186,15 +208,23 @@ function normalizeProduct(p: RawProduct): KrogerProduct {
   const regular = item?.price?.regular;
   const promo = item?.price?.promo;
   const onSale = !!(promo && promo > 0 && regular && promo < regular);
+  const regPerUnit = item?.price?.regularPerUnitEstimate;
+  const promoPerUnit = item?.price?.promoPerUnitEstimate;
   return {
     productId: p.productId,
     upc: p.upc,
     description: p.description,
     brand: p.brand,
     categories: p.categories,
+    countryOrigin: p.countryOrigin,
+    temperature: p.temperature?.indicator,
     size: item?.size,
+    soldBy: item?.soldBy,
+    fulfillment: item?.fulfillment,
     regularPrice: regular,
     promoPrice: promo && promo > 0 ? promo : undefined,
+    regularPricePerUnit: regPerUnit && regPerUnit > 0 ? regPerUnit : undefined,
+    promoPricePerUnit: promoPerUnit && promoPerUnit > 0 ? promoPerUnit : undefined,
     onSale,
   };
 }

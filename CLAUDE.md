@@ -107,10 +107,16 @@ state; the OAuth provider never touches Kroger tokens.
 - `promote_to_usuals` — bulk-add products to the recurring list (turn a
   just-built cart into usuals so next week is one call).
 - `remove_usual_item`, `update_usual_item` — list maintenance.
-- `search_products` — catalog search (price-aware when default location is set).
-  Output includes each candidate's `productId`, `upc`, brand and category, and
-  is reordered to favor fresh produce when the query has no brand/processing
-  signal (see below).
+- `search_products` — catalog search. Each result surfaces what Kroger gives
+  us about the item: `productId`, `upc`, brand, category, size,
+  sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of
+  origin, and per-fulfillment availability (pickup/delivery/ship). When a
+  default location is set, prices/sale flags and a per-unit price estimate are
+  store-specific. Results are reordered to favor fresh produce when the query
+  has no brand/processing signal (see below). The display lives in
+  `formatProduct()` in `src/mcp.ts`; the extraction from Kroger's raw response
+  is `normalizeProduct()` in `src/kroger.ts` (everything's optional — missing
+  fields just don't render).
 
 ### Structured errors
 

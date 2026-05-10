@@ -88,6 +88,7 @@ const PROCESSED_CATEGORY = /\bfrozen\b|\bsnack|\bcandy\b|\bcereal\b|\bbakery\b|\
 interface RankableProduct {
   brand?: string;
   categories?: string[];
+  temperature?: string; // "Ambient" | "Refrigerated" | "Frozen"
 }
 
 // Kroger's `filter.term` relevance is rough — "banana" can surface peach cups,
@@ -114,7 +115,7 @@ export function reorderForRelevance<T extends RankableProduct>(query: string, pr
   const rank = (p: T): number => {
     const c = cats(p);
     if (FRESH_CATEGORY.test(c)) return 0;
-    if (PROCESSED_CATEGORY.test(c)) return 2;
+    if (PROCESSED_CATEGORY.test(c) || /frozen/i.test(p.temperature ?? "")) return 2;
     return 1;
   };
   return products
