@@ -80,7 +80,10 @@ function fulfillmentSummary(f?: ProductFulfillment): string | undefined {
 // name + price (+ per-unit estimate), then the attributes Kroger gives us
 // (size, brand, category, temperature, sold-by, origin, fulfillment), then ids.
 function formatProduct(p: KrogerProduct, n: number): string {
-  const perUnit = typeof p.regularPricePerUnit === "number" ? ` (~$${p.regularPricePerUnit.toFixed(2)}/unit)` : "";
+  // Mirror priceLine: when on sale, the per-unit estimate should be the promo one.
+  const pricePerUnit =
+    p.onSale && typeof p.promoPricePerUnit === "number" ? p.promoPricePerUnit : p.regularPricePerUnit;
+  const perUnit = typeof pricePerUnit === "number" ? ` (~$${pricePerUnit.toFixed(2)}/unit)` : "";
   const attrs = [
     p.size,
     p.brand,
@@ -213,11 +216,12 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
         guard(async () => {
           const loc = await requireDefaultLocation(env);
           if (isToolResult(loc)) return loc;
-          const result = await buildCart(env, items);
+          const result = await buildCart(env, items, loc);
           const lines: string[] = [`Added ${result.added.length} of ${items.length} item(s) to your Kroger cart.`];
           for (const a of result.added) {
-            const label = [a.name ?? a.from, a.price].filter(Boolean).join(" — ");
-            lines.push(`✓ ${a.quantity} × ${label} [upc ${a.upc}]`);
+            // For an upc-only line `from` is already "upc <x>", so don't repeat it.
+            const head = a.name ? `${a.name}${a.price ? ` — ${a.price}` : ""} [upc ${a.upc}]` : `upc ${a.upc}`;
+            lines.push(`✓ ${a.quantity} × ${head}`);
           }
           for (const s of result.skipped) lines.push(`✗ ${s.from} — ${s.reason}`);
           lines.push("", `Review & checkout: ${result.checkoutUrl}`);
@@ -245,7 +249,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           }
           const locOrErr = await requireDefaultLocation(env);
           if (isToolResult(locOrErr)) return locOrErr;
-          const result = await buildCart(env, [{ query, quantity }]);
+          const result = await buildCart(env, [{ query, quantity }], locOrErr);
           const a = result.added[0];
           if (a) {
             return ok(`Added ${a.quantity} × ${a.name ?? a.from}${a.price ? ` (${a.price})` : ""} to your Kroger cart. Review & checkout: ${result.checkoutUrl}`);

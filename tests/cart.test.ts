@@ -121,4 +121,34 @@ describe("buildCart", () => {
       { upc: "U2", quantity: 3, modality: undefined },
     ]);
   });
+
+  it("uses an explicitly-passed locationId without reading KV", async () => {
+    getProducts.mockResolvedValueOnce([product({ productId: "P1", upc: "U1", description: "X" })]);
+    search.mockResolvedValueOnce([product({ productId: "P2", upc: "U2", description: "Y" })]);
+    // No default location set in KV, but we pass one explicitly.
+    await buildCart(env(), [{ productId: "P1" }, { query: "y" }], "62000999");
+    expect(getProducts.mock.calls[0]![1].locationId).toBe("62000999");
+    expect(search.mock.calls[0]![1].locationId).toBe("62000999");
+  });
+
+  it("searches each distinct query only once, in one batch", async () => {
+    search
+      .mockResolvedValueOnce([product({ productId: "PM", upc: "UM", description: "Milk" })])
+      .mockResolvedValueOnce([product({ productId: "PB", upc: "UB", description: "Bread" })]);
+    const r = await buildCart(env(), [
+      { query: "milk", quantity: 1 },
+      { query: "milk", quantity: 2 },
+      { query: "bread", quantity: 1 },
+    ]);
+    // two distinct queries → two searches, not three
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search.mock.calls.map((c) => c[1].term).sort()).toEqual(["bread", "milk"]);
+    // both "milk" lines resolved to the same upc, separate cart lines
+    expect(addCart.mock.calls[0]![1]).toEqual([
+      { upc: "UM", quantity: 1, modality: undefined },
+      { upc: "UM", quantity: 2, modality: undefined },
+      { upc: "UB", quantity: 1, modality: undefined },
+    ]);
+    expect(r.added).toHaveLength(3);
+  });
 });
