@@ -66,10 +66,16 @@ export async function clearDefaultLocationChain(env: Env): Promise<void> {
 }
 
 // The kroger.com / kingsoopers.com / fredmeyer.com / … cart URL for the
-// current default store's banner. Falls back to kroger.com when no chain has
-// been recorded.
-export async function getCheckoutUrl(env: Env): Promise<string> {
-  return cartUrl(await getDefaultLocationChain(env));
+// current default store's banner. Callers that already hold the chain (e.g.
+// get_default_location) can pass it to skip the KV read. Never throws — a KV
+// hiccup just falls back to kroger.com, which is a worse-but-harmless link.
+export async function getCheckoutUrl(env: Env, chain?: string | null): Promise<string> {
+  if (chain !== undefined) return cartUrl(chain);
+  try {
+    return cartUrl(await getDefaultLocationChain(env));
+  } catch {
+    return cartUrl(null);
+  }
 }
 
 export async function getUsualItems(env: Env): Promise<UsualItemsDoc> {

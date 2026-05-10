@@ -103,10 +103,14 @@ Kroger runs ~25 banner stores (King Soopers, Fred Meyer, Ralphs, QFC, …), each
 with its own e-commerce site. Items added against a banner's `locationId` land
 in *that banner's* cart, not `kroger.com`. So the checkout link the tools return
 follows the default store's banner. The banner→domain map lives in
-`bannerHost()` in `src/util.ts`; unknown or missing banners fall back to
-`kroger.com`. `set_default_location` looks the banner up via the Locations API
-and stores it in `prefs:default_location_chain`; if the lookup fails it clears
-the key rather than risk pointing at the wrong site.
+`bannerHost()` in `src/util.ts` (best-effort; unknown or missing banners fall
+back to `kroger.com`). `set_default_location` first validates the `locationId`
+via the Locations API: a 404 is refused outright (a bogus id would otherwise
+break every later product/cart call); on success it stores the id and the
+store's `chain` in `prefs:default_location_chain`; on a transient lookup error
+it still stores the id but clears the chain so the URL safely falls back to
+`kroger.com`. `getCheckoutUrl()` never throws — a KV hiccup also falls back to
+`kroger.com`.
 
 ## KV layout
 

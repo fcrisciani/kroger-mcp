@@ -52,26 +52,37 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
 
     this.server.tool(
       "set_default_location",
-      "Save a Kroger locationId as the default store for searches and the cart. Also records the store's banner so checkout links point at the right site (kingsoopers.com, fredmeyer.com, …).",
+      "Save a Kroger locationId as the default store for searches and the cart. Validates the locationId first, and records the store's banner so checkout links point at the right site (kingsoopers.com, fredmeyer.com, …).",
       { locationId: z.string().min(1) },
       async ({ locationId }) => {
-        await setDefaultLocationId(env, locationId);
-        // Best-effort: look up the banner so checkout URLs are correct. If the
-        // lookup fails, drop any stale chain rather than pointing at the wrong
-        // banner's site — the checkout URL then falls back to kroger.com.
-        let bannerNote = " The store's banner couldn't be determined; checkout links will use kroger.com.";
+        // Validate before storing: a bogus locationId would otherwise become
+        // the default and break every later product/cart call. On a *transient*
+        // lookup failure (not a 404) we still store it — refusing would be
+        // annoying if Kroger is just briefly flaky — but we clear any stale
+        // banner so the checkout URL safely falls back to kroger.com.
+        let loc;
         try {
-          const loc = await getLocation(env, locationId);
-          if (loc?.chain) {
-            await setDefaultLocationChain(env, loc.chain);
-            bannerNote = ` Banner: ${loc.chain}.`;
-          } else {
-            await clearDefaultLocationChain(env);
-          }
+          loc = await getLocation(env, locationId);
         } catch {
+          await setDefaultLocationId(env, locationId);
+          await clearDefaultLocationChain(env);
+          return {
+            content: [{ type: "text", text: `Default location set to ${locationId}. (Couldn't reach Kroger to verify the store or its banner; checkout links will use kroger.com.)` }],
+          };
+        }
+        if (!loc) {
+          return {
+            content: [{ type: "text", text: `No store found with locationId ${locationId}. Use find_locations to get a valid one.` }],
+          };
+        }
+        await setDefaultLocationId(env, locationId);
+        if (loc.chain) {
+          await setDefaultLocationChain(env, loc.chain);
+        } else {
           await clearDefaultLocationChain(env);
         }
-        return { content: [{ type: "text", text: `Default location set to ${locationId}.${bannerNote}` }] };
+        const bannerNote = loc.chain ? ` Banner: ${loc.chain}.` : " (Banner unknown; checkout links will use kroger.com.)";
+        return { content: [{ type: "text", text: `Default location set to ${locationId} — ${loc.name}.${bannerNote}` }] };
       },
     );
 
@@ -85,7 +96,7 @@ export class KrogerMCP extends McpAgent<Env, unknown, SessionProps> {
           return { content: [{ type: "text", text: "No default location set. Use find_locations + set_default_location." }] };
         }
         const chain = await getDefaultLocationChain(env);
-        const checkout = await getCheckoutUrl(env);
+        const checkout = await getCheckoutUrl(env, chain);
         return {
           content: [{ type: "text", text: `Default location: ${loc}${chain ? ` (banner: ${chain})` : ""}. Checkout URL: ${checkout}` }],
         };
