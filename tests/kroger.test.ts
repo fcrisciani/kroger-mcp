@@ -42,6 +42,63 @@ describe("getProductsByIds", () => {
     vi.restoreAllMocks();
   });
 
+  it("normalizes the rich product fields (fulfillment, soldBy, temperature, per-unit price, origin)", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              productId: "0001111060903",
+              upc: "0001111060903",
+              description: "Organic Sweet Basil",
+              brand: "Simple Truth Organic",
+              categories: ["Produce", "Fresh Herbs"],
+              countryOrigin: "United States",
+              temperature: { indicator: "Refrigerated", heatSensitive: false },
+              items: [
+                {
+                  size: "0.5 oz",
+                  soldBy: "UNIT",
+                  fulfillment: { curbside: true, delivery: true, inStore: true, shipToHome: false },
+                  price: { regular: 1.99, promo: 1.49, regularPerUnitEstimate: 3.98, promoPerUnitEstimate: 2.98 },
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const [p] = await getProductsByIds(env, { productIds: ["0001111060903"] });
+    expect(p?.brand).toBe("Simple Truth Organic");
+    expect(p?.categories).toEqual(["Produce", "Fresh Herbs"]);
+    expect(p?.countryOrigin).toBe("United States");
+    expect(p?.temperature).toBe("Refrigerated");
+    expect(p?.size).toBe("0.5 oz");
+    expect(p?.soldBy).toBe("UNIT");
+    expect(p?.fulfillment).toEqual({ curbside: true, delivery: true, inStore: true, shipToHome: false });
+    expect(p?.regularPrice).toBe(1.99);
+    expect(p?.promoPrice).toBe(1.49);
+    expect(p?.regularPricePerUnit).toBe(3.98);
+    expect(p?.promoPricePerUnit).toBe(2.98);
+    expect(p?.onSale).toBe(true);
+  });
+
+  it("treats a 0 promo / 0 per-unit-promo as 'no promo'", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [{ productId: "P", upc: "U", description: "Plain", items: [{ price: { regular: 2.0, promo: 0, promoPerUnitEstimate: 0 } }] }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const [p] = await getProductsByIds(env, { productIds: ["P"] });
+    expect(p?.promoPrice).toBeUndefined();
+    expect(p?.promoPricePerUnit).toBeUndefined();
+    expect(p?.onSale).toBe(false);
+  });
+
   it("returns [] without calling fetch when given no productIds", async () => {
     const out = await getProductsByIds(env, { productIds: [] });
     expect(out).toEqual([]);

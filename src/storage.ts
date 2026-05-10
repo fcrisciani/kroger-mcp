@@ -108,6 +108,27 @@ export async function upsertUsualItem(env: Env, item: UsualItem): Promise<UsualI
   return doc.items.find((i) => i.productId === item.productId)!;
 }
 
+// Upsert several items in a single read-modify-write, with the same protected-
+// field rules as upsertUsualItem (addedBy preserved on existing items,
+// timesOrdered/lastOrdered never clobbered). Use this for promote_to_usuals so
+// converting a 40-item cart isn't 40 separate KV writes (slow, and racy).
+// Returns the new doc's items.
+export async function bulkUpsertUsualItems(env: Env, items: UsualItem[]): Promise<UsualItem[]> {
+  if (items.length === 0) return (await getUsualItems(env)).items;
+  const doc = await getUsualItems(env);
+  for (const item of items) {
+    const idx = doc.items.findIndex((i) => i.productId === item.productId);
+    if (idx >= 0) {
+      const { addedBy: _a, timesOrdered: _t, lastOrdered: _l, ...updates } = item;
+      doc.items[idx] = { ...doc.items[idx]!, ...updates };
+    } else {
+      doc.items.push(item);
+    }
+  }
+  await saveUsualItems(env, doc);
+  return doc.items;
+}
+
 // Apply a partial update to an existing item without touching the protected
 // fields (addedBy / timesOrdered / lastOrdered). Use this for tools that just
 // tweak knobs like quantity or cadence — going through upsertUsualItem would

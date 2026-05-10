@@ -69,12 +69,14 @@ state; the OAuth provider never touches Kroger tokens.
 | File              | Purpose                                                     |
 |-------------------|-------------------------------------------------------------|
 | `src/index.ts`    | Entry point. Wires `OAuthProvider` → MCP + default handler. |
-| `src/mcp.ts`      | `KrogerMCP` `McpAgent` subclass. All tool definitions.      |
-| `src/kroger.ts`   | Kroger API client: tokens (CC + auth-code + refresh), products, locations, cart, PKCE helpers. |
+| `src/mcp.ts`      | `KrogerMCP` `McpAgent` subclass. Thin tool definitions; `ok`/`fail`/`guard` helpers for structured errors. |
+| `src/kroger.ts`   | Kroger API client: tokens (CC + auth-code + refresh), products, locations, cart, PKCE helpers. `searchProducts` applies the relevance reorder. |
+| `src/cart.ts`     | `buildCart` — resolves a mixed `{upc|productId|query}` batch to UPCs, one `cart/add`, per-line result. Used by `add_to_cart` and `add_one_off`. |
+| `src/weekly-order.ts` | `runWeeklyOrder` — the `prepare_weekly_order` body, extracted so it's testable. |
 | `src/access.ts`   | Cloudflare Access JWT verifier (JWKS cached per isolate).   |
 | `src/auth.ts`     | Hono app: landing page, `/authorize` (Access-gated), Kroger OAuth setup. |
-| `src/storage.ts`  | KV helpers (tokens, default location, usual items).         |
-| `src/util.ts`     | Pure helpers: `isDue`, `priceLine`. Tested in isolation.    |
+| `src/storage.ts`  | KV helpers (tokens, default location + banner, usual items, checkout URL). |
+| `src/util.ts`     | Pure helpers: `isDue`, `priceLine`, `bannerHost`/`cartUrl`, `reorderForRelevance`. Tested in isolation. |
 | `src/types.ts`    | Shared types (`Env`, `SessionProps`, domain shapes).        |
 | `wrangler.jsonc`  | Worker config: KV bindings, DO migrations, vars.            |
 | `.github/workflows/ci.yml` | typecheck → vitest → wrangler dry-run on every PR. |
@@ -82,20 +84,62 @@ state; the OAuth provider never touches Kroger tokens.
 
 ## Tools (alphabetical)
 
-- `add_one_off` — fuzzy product search + add top match to shared Kroger cart.
-- `add_usual_item` — upsert into the household recurring list. Stamps `addedBy`.
+- `add_one_off` — convenience: fuzzy search a single item + add the top match.
+  For anything ambiguous, prefer `search_products` → `add_to_cart` with a UPC.
+- `add_to_cart` — *the deterministic add path.* Takes a batch of items, each
+  identified by `upc` (no lookup), `productId` (resolved server-side), or
+  `query` (fuzzy, top match). One `cart/add` call; per-line result. Requires a
+  default store.
+- `add_usual_item` — upsert into the household recurring list. Accepts either a
+  free-text `query` (resolved server-side; response echoes the resolved name) or
+  explicit `productId`+`name`. Stamps `addedBy`.
 - `check_sales_on_usuals` — read-only: which household items are on sale?
 - `find_locations` — store search by ZIP. Output includes the banner (`KROGER`,
   `KINGSOOPERS`, …) since each banner has its own website.
 - `get_default_location` / `set_default_location` — pin a `locationId` for the
-  household. `set_default_location` also records the store's banner so checkout
-  links point at the right site (kingsoopers.com, fredmeyer.com, …).
+  household. `set_default_location` validates the id first and records the
+  store's banner so checkout links point at the right site (kingsoopers.com,
+  fredmeyer.com, …).
 - `list_usual_items` — show recurring items (with `addedBy`); filter by what's due.
 - `prepare_weekly_order` — *the* tool. Pulls due-cadence usuals, resolves
   each to a current-price product at the default store, calls `cart/add`,
   bumps `lastOrdered`, returns a summary + checkout URL. Surfaces sale items.
+- `promote_to_usuals` — bulk-add products to the recurring list (turn a
+  just-built cart into usuals so next week is one call).
 - `remove_usual_item`, `update_usual_item` — list maintenance.
-- `search_products` — catalog search (price-aware when default location is set).
+- `search_products` — catalog search. Each result surfaces what Kroger gives
+  us about the item: `productId`, `upc`, brand, category, size,
+  sold-by-weight-vs-unit, temperature (ambient/refrigerated/frozen), country of
+  origin, and per-fulfillment availability (pickup/delivery/ship). When a
+  default location is set, prices/sale flags and a per-unit price estimate are
+  store-specific. Results are reordered to favor fresh produce when the query
+  has no brand/processing signal (see below). The display lives in
+  `formatProduct()` in `src/mcp.ts`; the extraction from Kroger's raw response
+  is `normalizeProduct()` in `src/kroger.ts` (everything's optional — missing
+  fields just don't render).
+
+### Structured errors
+
+Tool bodies run inside `guard()` (`src/mcp.ts`), which maps known failures to a
+prefixed message — `NO_DEFAULT_LOCATION`, `KROGER_NOT_CONNECTED`,
+`PRODUCT_NOT_FOUND`, `MISSING_ARGS` — and sets `isError: true`, so the agent can
+retry the right precondition instead of escalating. Anything unexpected is
+`INTERNAL_ERROR: <message>`. When adding a tool that has a precondition (needs a
+default location, needs the Kroger account connected), return the matching code
+rather than throwing a bare string.
+
+### Search relevance reorder
+
+Kroger's `filter.term` relevance is rough ("banana" → peach cups, "zucchini" →
+a frozen Smart Ones meal). `reorderForRelevance()` in `src/util.ts` does a
+*stable* reorder of `searchProducts` results: when the query has no brand or
+processing word ("frozen", "canned", "instant", "snack", …) and there's a
+fresh-vs-processed split in the candidates, fresh-produce results move up and
+obviously off-category (frozen/snack/bakery/…) ones move down. It only
+reorders — never drops anything — and bails (returns the list untouched) when
+the query names a known brand or contains a processing word. It's a heuristic,
+not a fix for Kroger's search; the real precision path is
+`search_products` → `add_to_cart` with a chosen `upc`.
 
 ### Banner-aware checkout URLs
 
@@ -184,7 +228,9 @@ and Claude is issued a token bound to their email. Tools become available.
 
 - **Don't hand-roll Kroger HTTP calls in tools.** Add a typed function in
   `src/kroger.ts` and call it from the tool. Tools should be thin glue.
-- **Don't add a "checkout" tool.** See the hard constraint above.
+- **Don't add a "checkout" tool, a `get_cart`, a `clear_cart`, or anything that
+  reads or mutates the cart.** The public Cart API is `PUT /v1/cart/add` and
+  nothing else. See the hard constraint above.
 - **Don't store passwords in the Worker.** Identity comes from Cloudflare
   Access. If you need to add or remove a family member, do it in the Access
   policy in the Cloudflare dashboard.
@@ -196,10 +242,12 @@ and Claude is issued a token bound to their email. Tools become available.
 - **Schema changes to `usual_items`** must be additive and tolerate old
   documents in KV (e.g. missing `addedBy`). No forced migrations, no failing
   reads on missing fields.
-- **New tools follow the pattern in `src/mcp.ts`**: zod schema for inputs, one
-  `await` call to a `kroger.ts` or `storage.ts` function, return `{ content:
-  [{ type: "text", text }] }`. Stamp `addedBy = this.props.email` when
-  creating a new usual item.
+- **New tools follow the pattern in `src/mcp.ts`**: zod schema for inputs, body
+  wrapped in `guard(async () => …)`, return `ok(text)` or `fail(CODE, msg)`;
+  the heavy lifting goes in a `kroger.ts` / `storage.ts` / `cart.ts` /
+  `weekly-order.ts` function so it's testable without the McpAgent DO. Stamp
+  `addedBy = this.props.email` when creating a usual item. If a tool has a
+  precondition, `fail("NO_DEFAULT_LOCATION"|…, …)` instead of throwing.
 - **No comments restating what the code does.** Keep comments for the *why*
   (subtle invariants, API quirks, security reasoning).
 - **Type-check and test before committing**: `npm run typecheck && npm test`.

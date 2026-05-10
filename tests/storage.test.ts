@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  bulkUpsertUsualItems,
   clearDefaultLocationChain,
   getCheckoutUrl,
   getUsualItems,
   patchUsualItem,
+  saveUsualItems,
   setDefaultLocationChain,
   upsertUsualItem,
 } from "../src/storage.js";
-import type { Env } from "../src/types.js";
+import type { Env, UsualItem } from "../src/types.js";
 import { makeEnv, MemoryKV } from "./helpers.js";
 
 const milk = {
@@ -155,5 +157,50 @@ describe("getCheckoutUrl", () => {
     await setDefaultLocationChain(env, "FREDMEYER");
     await clearDefaultLocationChain(env);
     expect(await getCheckoutUrl(env)).toBe("https://www.kroger.com/cart");
+  });
+});
+
+describe("bulkUpsertUsualItems", () => {
+  const mk = (p: string, over: Partial<UsualItem> = {}): UsualItem => ({
+    productId: p,
+    name: `Item ${p}`,
+    defaultQty: 1,
+    cadence: "weekly",
+    timesOrdered: 0,
+    ...over,
+  });
+
+  it("inserts several new items in one go", async () => {
+    const env = makeEnv();
+    const items = await bulkUpsertUsualItems(env, [mk("A"), mk("B"), mk("C")]);
+    expect(items.map((i) => i.productId).sort()).toEqual(["A", "B", "C"]);
+    // persisted, not just returned
+    const doc = await getUsualItems(env);
+    expect(doc.items).toHaveLength(3);
+  });
+
+  it("updates existing items without clobbering addedBy / timesOrdered / lastOrdered", async () => {
+    const env = makeEnv();
+    // Seed an item that already has order history.
+    await saveUsualItems(env, {
+      items: [mk("A", { addedBy: "alice@example.com", timesOrdered: 9, lastOrdered: "2026-05-01T00:00:00Z" })],
+      updatedAt: "2026-05-01T00:00:00Z",
+    });
+
+    const out = await bulkUpsertUsualItems(env, [
+      mk("A", { defaultQty: 4, timesOrdered: 0, addedBy: "bob@example.com" }), // a tool re-adds it
+      mk("D", { addedBy: "carol@example.com" }),
+    ]);
+    const a = out.find((i) => i.productId === "A")!;
+    expect(a.defaultQty).toBe(4);
+    expect(a.timesOrdered).toBe(9);
+    expect(a.lastOrdered).toBe("2026-05-01T00:00:00Z");
+    expect(a.addedBy).toBe("alice@example.com");
+    expect(out.find((i) => i.productId === "D")?.addedBy).toBe("carol@example.com");
+  });
+
+  it("is a no-op on an empty list", async () => {
+    const env = makeEnv();
+    expect(await bulkUpsertUsualItems(env, [])).toEqual([]);
   });
 });
